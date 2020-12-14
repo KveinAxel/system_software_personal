@@ -17,6 +17,7 @@ pub struct BTree {
 }
 
 impl BTree {
+    #[allow(dead_code)]
     fn new(pager: Pager, root: Node) -> BTree {
         BTree {
             pager,
@@ -24,7 +25,7 @@ impl BTree {
         }
     }
 
-    /// search searches for a specific key in the BTree.
+    /// 在树上查询一个键
     pub fn search(&mut self, key: String) -> Result<KeyValuePair, Error> {
         let (_, kv) = self.search_node(Arc::clone(&self.root), &key)?;
         return match kv {
@@ -33,24 +34,24 @@ impl BTree {
         }
     }
 
-    /// insert a key value pair possibly splitting nodes along the way.
+    /// 插入一个键值对，可能沿途分裂节点
     pub fn insert(&mut self, kv: KeyValuePair) -> Result<(), Error> {
         let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key)?;
         match kv_pair_exists {
-            // Key already exists in the tree.
+            // 树中已经有键了
             Some(_) => return Err(Error::KeyAlreadyExists),
             None => (),
         };
-        // add key to node here possibly splitting nodes along the way.
+        // 在这里加键可能会沿途分裂节点
         let mut guarded_node = match node.write() {
             Err(_) => return Err(Error::UnexpectedError),
             Ok(node) => node,
         };
         let keys_len = guarded_node.get_keys_len()?;
         if keys_len < NODE_KEYS_LIMIT {
-            // Add the new key value pair to the in-memory struct.
+            // 在内存中的struct中添加键值对.
             guarded_node.add_key_value_pair(kv)?;
-            // Write the corresponding page to file.
+            // 将对应页写入磁盘.
             return self
                 .pager
                 .write_page(&guarded_node.page, &guarded_node.offset);
@@ -59,11 +60,11 @@ impl BTree {
         Ok(())
     }
 
-    /// search_node recursively searches a sub tree rooted at node for a key
-    /// using a Pager to request pages as it traverses the subtree.
-    /// if we have traveresed all the way to the leaves and the key was not found the method
-    /// returns the leaf node and None indicating the key was not found,
-    /// otherwise, continues recursively or return the appropriate error.
+    /// search_node 以当前节点为根的子树递归查询一个键
+    /// 使用 pager 来获取页来遍历子树
+    /// 如果遍历了所有的叶子节点，还没有找到对应的键
+    /// 返回叶子节点和空来表示没找到
+    /// 否则，继续递归或者返回合适的错误
     fn search_node(
         &mut self,
         node: Arc<RwLock<Node>>,
@@ -75,7 +76,6 @@ impl BTree {
         };
         let keys = guarded_node.get_keys()?;
         for (i, key) in keys.iter().enumerate() {
-            // If this is the case were at a leaf node.
             if *key == *search_key {
                 let kv_pairs = guarded_node.get_key_value_pairs()?;
                 return match kv_pairs.get(i) {
@@ -130,6 +130,7 @@ impl BTree {
         })?;
         let median_key = &keys[keys.len() / 2];
         parent_node.add_key(median_key.to_string())
+        // todo 分裂两个节点，并建立索引
     }
 }
 

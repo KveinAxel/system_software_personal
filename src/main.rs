@@ -5,4 +5,6 @@ pub mod node;
 pub mod page;
 pub mod pager;
 
-fn main() {}
+fn main() {
+    println!("hello world");
+}

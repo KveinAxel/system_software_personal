@@ -31,12 +31,14 @@ const INTERNAL_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + INTERNAL_NODE
 
 /// 在一个 64 位机上存储儿子指针数的最大值
 /// 是 200 * 8 = 1600 字节
+#[allow(dead_code)]
 const MAX_SPACE_FOR_CHILDREN: usize = MAX_BRANCHING_FACTOR * PTR_SIZE;
 
 /// 这留下了 2476 个字节给中间节点的键:
 /// 我们用 2388 字节给键并且将剩下的88字节视为垃圾.
 /// 这意味着每个键被限制为 12 字节. (2476 / keys limit ~= 12)
 /// 向下取整到 10 来容纳叶子节点.
+#[allow(dead_code)]
 const MAX_SPACE_FOR_KEYS: usize = PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE - MAX_SPACE_FOR_CHILDREN;
 
 /// 键和值的大小
@@ -50,7 +52,7 @@ pub enum NodeType {
     Unknown,
 }
 
-// 将一个字节转换成 NodeType.
+/// 将一个字节转换成 NodeType.
 impl From<u8> for NodeType {
     fn from(orig: u8) -> Self {
         return match orig {
@@ -314,6 +316,7 @@ impl Node {
     }
 
     /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
+    #[allow(unused_variables)]
     pub fn split(&self) -> Result<(String, Node, Node), Error> {
         match self.node_type {
             NodeType::Internal => {
@@ -345,14 +348,16 @@ impl Node {
                     offset += KEY_SIZE;
                 }
 
-                // TODO: 在这里创建左右节点， 并将他们添加到索引文件
-                // let left_node = Node::new(node_type: NodeType::Internal,
-                //     offset: usize,
-                //     parent_offset: usize,
-                //     is_root: bool,
-                //     page: Page)
-                //Ok((String::from(median_key), ,))
-
+                /// TODO: 在这里创建左右节点， 并将他们添加到索引文件
+                ///
+                /// ```
+                /// let left_node = Node::new(node_type: NodeType::Internal,
+                ///     offset: usize,
+                ///     parent_offset: usize,
+                ///     is_root: bool,
+                ///     page: Page)
+                /// Ok((String::from(median_key), ,))
+                /// ```
                 Err(Error::UnexpectedError)
             }
             NodeType::Leaf => Err(Error::UnexpectedError),
@@ -373,7 +378,7 @@ impl TryFrom<Node> for [u8; PAGE_SIZE] {
     }
 }
 
-// NodeSpec 是一个包装。通过 TryFrom 将一个页的字节数组转换成 Node struct 来实现.
+/// NodeSpec 是一个包装。通过 TryFrom 将一个页的字节数组转换成 Node struct 来实现.
 pub struct NodeSpec {
     pub page_data: [u8; PAGE_SIZE],
     pub offset: usize,
