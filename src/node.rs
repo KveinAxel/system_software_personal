@@ -1,7 +1,7 @@
 use crate::btree::MAX_BRANCHING_FACTOR;
 use crate::error::Error;
 use crate::key_value_pair::KeyValuePair;
-use crate::page::{Page, PAGE_SIZE, PTR_SIZE, Value};
+use crate::page::{Page, PAGE_SIZE, PTR_SIZE};
 use std::convert::TryFrom;
 use std::str;
 
@@ -437,7 +437,6 @@ impl TryFrom<NodeSpec> for Node {
         ));
     }
 }
-
 #[cfg(test)]
 mod tests {
     use crate::error::Error;
@@ -448,22 +447,17 @@ mod tests {
     use crate::page::PAGE_SIZE;
     use std::convert::TryFrom;
 
-    const PAGE_DATA: [u8; DATA_LEN] = [
-        0x01, // 是否为根节点.
-        0x01, // 节点类型.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 父节点偏移.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, // 孩子节点数.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096  (第二页)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // 8192  (第三页)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, // 12288 (第四页)
-        0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
-        0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
-    ];
-
     #[test]
     fn page_to_node_works() -> Result<(), Error> {
         const DATA_LEN: usize = LEAF_NODE_HEADER_SIZE + KEY_SIZE + VALUE_SIZE;
-        let page_data: [u8; DATA_LEN] = PAGE_DATA.clone();
+        let page_data: [u8; DATA_LEN] = [
+            0x01, // Is-Root byte.
+            0x02, // Node type byte.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Parent offset.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // Number of Key-Value pairs.
+            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
+            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
+        ];
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
@@ -472,7 +466,7 @@ mod tests {
 
         let offset = PAGE_SIZE * 2;
         let node = Node::try_from(NodeSpec {
-            offset,
+            offset: offset,
             page_data: page,
         })?;
 
@@ -485,7 +479,14 @@ mod tests {
     #[test]
     fn get_key_value_pairs_works() -> Result<(), Error> {
         const DATA_LEN: usize = LEAF_NODE_HEADER_SIZE + KEY_SIZE + VALUE_SIZE;
-        let page_data: [u8; DATA_LEN] = PAGE_DATA.clone();
+        let page_data: [u8; DATA_LEN] = [
+            0x01, // Is-Root byte.
+            0x02, // Node type byte.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Parent offset.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // Number of Key-Value pairs.
+            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
+            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
+        ];
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
@@ -494,7 +495,7 @@ mod tests {
 
         let offset = PAGE_SIZE * 2;
         let node = Node::try_from(NodeSpec {
-            offset,
+            offset: offset,
             page_data: page,
         })?;
         let kv = node.get_key_value_pairs()?;
@@ -514,10 +515,20 @@ mod tests {
     #[test]
     fn get_children_works() -> Result<(), Error> {
         const DATA_LEN: usize = INTERNAL_NODE_HEADER_SIZE + 3 * PTR_SIZE + 2 * KEY_SIZE;
-        let page_data: [u8; DATA_LEN] = PAGE_DATA.clone();
+        let page_data: [u8; DATA_LEN] = [
+            0x01, // Is-Root byte.
+            0x01, // Node type byte.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Parent offset.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, // Number of children.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096  (2nd Page)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // 8192  (3rd Page)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, // 12288 (4th Page)
+            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
+            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
+        ];
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
 
-        // 连接 page_data 和 junk 两个数组.
+        // Concatenate the two arrays; page_data and junk.
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
             *to = *from
@@ -525,7 +536,7 @@ mod tests {
 
         let offset = 0;
         let node = Node::try_from(NodeSpec {
-            offset,
+            offset: offset,
             page_data: page,
         })?;
         let children = node.get_children()?;
@@ -541,10 +552,20 @@ mod tests {
     #[test]
     fn get_keys_work_for_internal_node() -> Result<(), Error> {
         const DATA_LEN: usize = INTERNAL_NODE_HEADER_SIZE + 3 * PTR_SIZE + 2 * KEY_SIZE;
-        let page_data: [u8; DATA_LEN] = PAGE_DATA.clone();
+        let page_data: [u8; DATA_LEN] = [
+            0x01, // Is-Root byte.
+            0x01, // Node type byte.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Parent offset.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, // Number of children.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096  (2nd Page)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // 8192  (3rd Page)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, // 12288 (4th Page)
+            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
+            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
+        ];
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
 
-        // 连接 page_data 和 junk 两个数组.
+        // Concatenate the two arrays; page_data and junk.
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
             *to = *from
@@ -552,7 +573,7 @@ mod tests {
 
         let offset = 0;
         let node = Node::try_from(NodeSpec {
-            offset,
+            offset: offset,
             page_data: page,
         })?;
         let keys = node.get_keys()?;
@@ -577,10 +598,10 @@ mod tests {
     fn get_keys_work_for_leaf_node() -> Result<(), Error> {
         const DATA_LEN: usize = INTERNAL_NODE_HEADER_SIZE + 2 * KEY_SIZE + 2 * VALUE_SIZE;
         let page_data: [u8; DATA_LEN] = [
-            0x01, // 是否为根节点
-            0x02, // 节点类型
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 父节点偏移
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // 儿子节点数
+            0x01, // Is-Root byte.
+            0x02, // Node type byte.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Parent offset.
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // Number of Key-Value pairs.
             0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
             0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
             0x66, 0x6f, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // "foo"
@@ -589,7 +610,7 @@ mod tests {
 
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
 
-        // 连接 page_data 和 junk 两个数组.
+        // Concatenate the two arrays; page_data and junk.
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
             *to = *from
@@ -597,7 +618,7 @@ mod tests {
 
         let offset = 0;
         let node = Node::try_from(NodeSpec {
-            offset,
+            offset: offset,
             page_data: page,
         })?;
 
