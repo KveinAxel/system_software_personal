@@ -6,59 +6,67 @@ use std::fs::{File, OpenOptions};
 use std::io::{SeekFrom, Seek, Read, Write};
 use std::path::Path;
 
-const BUFFER_NUM: usize = 20;
-const BUFFER_SIZE: usize = PAGE_SIZE * BUFFER_NUM;
-
 
 /// 缓冲区的trait，实现了通过缓冲区获取页、写入页、强制刷新页
 pub trait Buffer {
+    fn fill_up_to(&mut self, size: usize) -> Result<(), Error>;
+
     fn get_page(&mut self, offset: usize) -> Result<[u8; PAGE_SIZE], Error>;
 
-    fn write_page(&mut self, offset: usize, page: Page) -> Result<(), Error>;
+    fn write_page(&mut self, offset: &usize, page: &Page) -> Result<(), Error>;
 
-    fn flush(&mut self, offset: usize) -> Result<(), Error>;
+    fn flush(&mut self, offset: &usize) -> Result<(), Error>;
 }
 
 /// LRU算法实现的Buffer
-pub struct LRUBuffer {
-    buff: Box<[u8; BUFFER_SIZE]>,
-    list: LinkedList<LRUBufferItem>,
+pub struct LRUBuffer<'a> {
+    buff: Vec<u8>,
+    list: LinkedList<LRUBufferItem<'a>>,
     len: usize,
+    buff_size: usize,
     file: File,
 }
 
 /// LRUBuffer中的每一项
-struct LRUBufferItem {
-    offset: usize,
-    page: Page,
+struct LRUBufferItem<'a> {
+    offset: &'a usize,
+    page: &'a Page,
     time: SystemTime,
 }
 
 impl LRUBuffer {
     /// LRUBuffer的构造方法
-    fn new(path: &Path) -> LRUBuffer {
+    fn new(path: &Path, buff_size: usize) -> LRUBuffer {
         let fd = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(path)?;
         LRUBuffer {
-            buff: Box::new([0; BUFFER_SIZE]),
+            buff: Vec::with_capacity(size),
             list: LinkedList::<LRUBufferItem>::new(),
             len: 0,
+            buff_size,
             file: fd,
         }
     }
 }
 
 impl Buffer for LRUBuffer {
+    /// 向文件填充占位符
+    fn fill_up_to(&mut self, size: usize) -> Result<(), Error> {
+        self.file.seek(SeekFrom::Start(0))?;
+        self.file.write_all(Vec::<u8>::with_capacity(size).as_slice())?;
+        return Ok(ok);
+    }
+
     /// 获取一个页
     /// 如果缓冲区有，直接从缓冲区拿
     /// 否则，加载一个磁盘页面到缓冲区
     /// 如果缓冲区已满，淘汰时间最早的页面
-    fn get_page(&mut self, offset: usize) -> Result<[u8; PAGE_SIZE], Error> {
+    fn get_page(&mut self, offset: &usize) -> Result<[u8; PAGE_SIZE], Error> {
         for i in self.list.iter() {
-            if *i.offset == offset {
+            if *i.offset == *offset {
                 *i.time = SystemTime::now();
                 return Ok(*i.page.get_data());
             }
@@ -66,10 +74,10 @@ impl Buffer for LRUBuffer {
         let mut page: [u8; PAGE_SIZE] = [0x00; PAGE_SIZE];
         self.file.seek(SeekFrom::Start(offset as u64))?;
         self.file.read_exact(&mut page)?;
-        if len < BUFFER_NUM {
+        if self.len < self.buff_size {
             self.list.push_back(LRUBufferItem {
                 offset,
-                page: Page::new(page),
+                page: &Page::new(page),
                 time: SystemTime::now(),
             });
             self.len += 1;
@@ -87,7 +95,7 @@ impl Buffer for LRUBuffer {
                 Some(item) => {
                     self.flush(item.offset);
                     item.offset = offset;
-                    item.page = Page::new(page);
+                    item.page = &Page::new(page);
                     item.time = SystemTime::now();
                     Ok(page)
                 }
@@ -97,8 +105,8 @@ impl Buffer for LRUBuffer {
     }
 
     /// 向缓冲区写入一个页面
-    fn write_page(&mut self, offset: usize, page: Page) -> Result<(), Error> {
-        if len < BUFFER_NUM {
+    fn write_page(&mut self, offset: &usize, page: &Page) -> Result<(), Error> {
+        if self.len < self.buff_size {
             self.list.push_back(LRUBufferItem {
                 offset,
                 page,
@@ -130,9 +138,9 @@ impl Buffer for LRUBuffer {
 
     /// 强制刷新一个缓冲区的页面至磁盘
     /// 若页面不在缓冲区，则返回不在缓冲区异常
-    fn flush(&mut self, offset: usize) -> Result<(), Error> {
+    fn flush(&mut self, offset: &usize) -> Result<(), Error> {
         for i in self.list.iter() {
-            if *i.offset == offset {
+            if *i.offset == *offset {
                 *i.time = SystemTime::now();
                 self.file.seek(SeekFrom::Start(*offset as u64))?;
                 self.file.write_all(*i.get_data())?;
@@ -144,32 +152,34 @@ impl Buffer for LRUBuffer {
 }
 
 /// 采用时钟算法实现的Buffer
-pub struct ClockBuffer {
-    buff: Box<[u8; BUFFER_SIZE]>,
-    list: Vec<ClockBufferItem>,
+pub struct ClockBuffer<'a> {
+    buff: Vec<u8>,
+    list: Vec<ClockBufferItem<'a>>,
     len: usize,
     file: File,
     cur: usize,
+    buff_size: usize,
 }
 
 /// ClockBuffer中的每一项
-struct ClockBufferItem {
-    offset: usize,
-    page: Page,
+struct ClockBufferItem<'a> {
+    offset: &'a usize,
+    page: &'a Page,
     access: u8,
 }
 
 impl ClockBuffer {
-    fn new(path: &Path) -> ClockBuffer {
+    fn new(path: &Path, buff_size: usize) -> ClockBuffer {
         let fd = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(path)?;
         ClockBuffer {
-            buff: Box::new([0; BUFFER_SIZE]),
+            buff: Vec::with_capacity(size),
             list: Vec::<ClockBufferItem>::new(),
             len: 0,
+            buff_size,
             file: fd,
             cur: 0,
         }
@@ -177,14 +187,21 @@ impl ClockBuffer {
 }
 
 impl Buffer for ClockBuffer {
+    /// 向文件填充占位符
+    fn fill_up_to(&mut self, size: usize) -> Result<(), Error> {
+        self.file.seek(SeekFrom::Start(0))?;
+        self.file.write_all(Vec::<u8>::with_capacity(size).as_slice())?;
+        return Ok(ok);
+    }
+
     /// 根据偏移获取一个页面
     /// 如果页面在缓冲区，则直接返回，并更新access表示最近访问过
     /// 如果不在缓冲区，则加载一个磁盘页面至缓冲区
     /// 若缓冲区已满，则淘汰第一个遇到的access为0的页面，并将沿途access为1的页面置0，
     /// 新加载的页面的access置1
-    fn get_page(&mut self, offset: usize) -> Result<[u8; PAGE_SIZE], Error> {
+    fn get_page(&mut self, offset: &usize) -> Result<[u8; PAGE_SIZE], Error> {
         for i in self.list.iter() {
-            if *i.offset == offset {
+            if *i.offset == *offset {
                 *i.access = 1;
                 return Ok(*i.page.get_data())
             }
@@ -194,11 +211,11 @@ impl Buffer for ClockBuffer {
         self.file.seek(SeekFrom::Start(offset as u64))?;
         self.file.read_exact(&mut page)?;
 
-        if self.len < BUFFER_NUM {
+        if self.len < self.buff_size {
             self.len += 1;
             self.list.push(ClockBufferItem {
                 offset,
-                page: Page::new(page),
+                page: &Page::new(page),
                 access: 1,
             });
         } else {
@@ -218,9 +235,9 @@ impl Buffer for ClockBuffer {
                 }
                 None => self.cur
             };
-            self.flush(self.cur);
+            self.flush(&self.cur);
             self.list[self.cur] = ClockBufferItem {
-                page: Page::new(page),
+                page: &Page::new(page),
                 access: 1,
                 offset,
             };
@@ -231,15 +248,15 @@ impl Buffer for ClockBuffer {
     }
 
     /// 向缓冲区写入一个页面
-    fn write_page(&mut self, offset: usize, page: Page) -> Result<(), Error> {
-        if self.len < BUFFER_NUM {
+    fn write_page(&mut self, offset: &usize, page: &Page) -> Result<(), Error> {
+        return if self.len < self.buff_size {
             self.len += 1;
             self.list.push(ClockBufferItem {
                 offset,
                 page,
                 access: 1,
             });
-            return Ok(())
+            Ok(())
         } else {
             let mut new_cur: Option<usize> = None;
             for i in 0..BUFFER_NUM {
@@ -257,21 +274,21 @@ impl Buffer for ClockBuffer {
                 }
                 None => self.cur
             };
-            self.flush(self.cur);
+            self.flush(&self.cur);
             self.list[self.cur] = ClockBufferItem {
                 page,
                 access: 1,
                 offset,
             };
-            return Ok(())
+            Ok(())
         }
     }
 
     /// 强制刷新一个缓冲区的页面至磁盘
     /// 若页面不在缓冲区，则返回不在缓冲区异常
-    fn flush(&mut self, offset: usize) -> Result<(), Error> {
+    fn flush(&mut self, offset: &usize) -> Result<(), Error> {
         for i in self.list.iter() {
-            if *i.offset == offset {
+            if *i.offset == *offset {
                 *i.time = SystemTime::now();
                 self.file.seek(SeekFrom::Start(*offset as u64))?;
                 self.file.write_all(*i.get_data())?;

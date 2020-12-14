@@ -13,12 +13,12 @@ pub const NODE_KEYS_LIMIT: usize = MAX_BRANCHING_FACTOR - 1;
 /// B+树的定义
 pub struct BTree {
     root: Arc<RwLock<Node>>,
-    pager: Pager,
+    pager: Box<Pager>,
 }
 
 impl BTree {
     #[allow(dead_code)]
-    fn new(pager: Pager, root: Node) -> BTree {
+    fn new(pager: Box<Pager>, root: Node) -> BTree {
         BTree {
             pager,
             root: Arc::new(RwLock::new(root)),
@@ -31,7 +31,7 @@ impl BTree {
         return match kv {
             Some(kv) => Ok(kv),
             None => Err(Error::KeyNotFound),
-        }
+        };
     }
 
     /// 插入一个键值对，可能沿途分裂节点
