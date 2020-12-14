@@ -1,7 +1,7 @@
 use crate::btree::MAX_BRANCHING_FACTOR;
 use crate::error::Error;
 use crate::key_value_pair::KeyValuePair;
-use crate::page::{Page, PAGE_SIZE, PTR_SIZE};
+use crate::page::{Page, PAGE_SIZE, PTR_SIZE, Value};
 use std::convert::TryFrom;
 use std::str;
 
@@ -314,6 +314,39 @@ impl Node {
             _ => return Err(Error::KeyNotFound),
         }
     }
+
+    /// update_value 更新当前节点中包含键的键值对.
+    pub fn update_value(&mut self, kv: KeyValuePair) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Leaf => {
+                let mut res = Vec::<KeyValuePair>::new();
+                let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
+                let num_keys_val_pairs = self.page.get_value_from_offset(offset)?;
+
+                offset = LEAF_NODE_HEADER_SIZE;
+
+                for _i in 0..num_keys_val_pairs {
+                    let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
+                    let key = match str::from_utf8(key_raw) {
+                        Ok(key) => key,
+                        Err(_) => return Err(Error::UTF8Error),
+                    };
+                    offset += KEY_SIZE;
+                    if key == kv.key {
+                        let value_raw = kv.value.as_bytes();
+                        self.page
+                            .write_bytes_at_offset(value_raw, offset, VALUE_SIZE)?;
+                        return Ok(())
+                    }
+                    offset += VALUE_SIZE;
+                }
+                Err(Error::KeyNotFound)
+            }
+            _ => return Err(Error::KeyNotFound),
+        }
+    }
+
+
 
     /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
     #[allow(unused_variables)]
