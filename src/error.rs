@@ -5,6 +5,7 @@ pub enum Error {
     UnexpectedError,
     TryFromSliceError(&'static str),
     UTF8Error,
+    NotInBufferError,
 }
 
 impl std::convert::From<std::io::Error> for Error {
