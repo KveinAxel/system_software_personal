@@ -319,7 +319,6 @@ impl Node {
     pub fn update_value(&mut self, kv: KeyValuePair) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf => {
-                let mut res = Vec::<KeyValuePair>::new();
                 let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
                 let num_keys_val_pairs = self.page.get_value_from_offset(offset)?;
 
@@ -381,16 +380,14 @@ impl Node {
                     offset += KEY_SIZE;
                 }
 
-                /// TODO: 在这里创建左右节点， 并将他们添加到索引文件
-                ///
-                /// ```
-                /// let left_node = Node::new(node_type: NodeType::Internal,
-                ///     offset: usize,
-                ///     parent_offset: usize,
-                ///     is_root: bool,
-                ///     page: Page)
-                /// Ok((String::from(median_key), ,))
-                /// ```
+                // TODO: 在这里创建左右节点， 并将他们添加到索引文件
+                //
+                // let left_node = Node::new(node_type: NodeType::Internal,
+                //     offset: usize,
+                //     parent_offset: usize,
+                //     is_root: bool,
+                //     page: Page)
+                // Ok((String::from(median_key), ,))
                 Err(Error::UnexpectedError)
             }
             NodeType::Leaf => Err(Error::UnexpectedError),

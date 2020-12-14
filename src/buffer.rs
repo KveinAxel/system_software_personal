@@ -5,7 +5,6 @@ use std::time::SystemTime;
 use std::fs::{File, OpenOptions};
 use std::io::{SeekFrom, Seek, Read, Write};
 use std::path::Path;
-use std::cell::RefCell;
 
 
 /// 缓冲区的trait，实现了通过缓冲区获取页、写入页、强制刷新页
@@ -21,7 +20,6 @@ pub trait Buffer {
 
 /// LRU算法实现的Buffer
 pub struct LRUBuffer {
-    buff: Vec<u8>,
     list: LinkedList<LRUBufferItem>,
     len: usize,
     buff_size: usize,
@@ -45,7 +43,6 @@ impl LRUBuffer {
             .open(path)?;
         println!("{}创建成功！", path.to_str().unwrap());
         Ok(LRUBuffer {
-            buff: Vec::with_capacity(buff_size),
             list: LinkedList::<LRUBufferItem>::new(),
             len: 0,
             buff_size,
@@ -181,7 +178,6 @@ impl Buffer for LRUBuffer {
 
 /// 采用时钟算法实现的Buffer
 pub struct ClockBuffer {
-    buff: Vec<u8>,
     list: Vec<ClockBufferItem>,
     len: usize,
     file: File,
@@ -197,6 +193,7 @@ struct ClockBufferItem {
 }
 
 impl ClockBuffer {
+    #[allow(dead_code)]
     fn new(path: &Path, buff_size: usize) -> Result<ClockBuffer, Error> {
         let fd = OpenOptions::new()
             .create(true)
@@ -204,7 +201,6 @@ impl ClockBuffer {
             .write(true)
             .open(path)?;
         Ok(ClockBuffer {
-            buff: Vec::with_capacity(buff_size),
             list: Vec::<ClockBufferItem>::new(),
             len: 0,
             buff_size,
@@ -263,7 +259,7 @@ impl Buffer for ClockBuffer {
                 }
                 None => self.cur
             };
-            self.flush(self.cur);
+            self.flush(self.cur)?;
             self.list[self.cur] = ClockBufferItem {
                 page: Page::new(page),
                 access: 1,
@@ -302,7 +298,7 @@ impl Buffer for ClockBuffer {
                 }
                 None => self.cur
             };
-            self.flush(self.cur);
+            self.flush(self.cur)?;
             self.list[self.cur] = ClockBufferItem {
                 page,
                 access: 1,
