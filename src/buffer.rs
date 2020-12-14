@@ -2,8 +2,9 @@ use crate::page::{PAGE_SIZE, Page};
 use crate::error::Error;
 use std::collections::LinkedList;
 use std::time::SystemTime;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{SeekFrom, Seek, Read, Write};
+use std::path::Path;
 
 const BUFFER_NUM: usize = 20;
 const BUFFER_SIZE: usize = PAGE_SIZE * BUFFER_NUM;
@@ -35,12 +36,17 @@ struct LRUBufferItem {
 
 impl LRUBuffer {
     /// LRUBuffer的构造方法
-    fn new(file: File) -> LRUBuffer {
+    fn new(path: &Path) -> LRUBuffer {
+        let fd = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
         LRUBuffer {
             buff: Box::new([0; BUFFER_SIZE]),
             list: LinkedList::<LRUBufferItem>::new(),
             len: 0,
-            file,
+            file: fd,
         }
     }
 }
@@ -154,12 +160,17 @@ struct ClockBufferItem {
 }
 
 impl ClockBuffer {
-    fn new(file: File) -> ClockBuffer {
+    fn new(path: &Path) -> ClockBuffer {
+        let fd = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
         ClockBuffer {
             buff: Box::new([0; BUFFER_SIZE]),
             list: Vec::<ClockBufferItem>::new(),
             len: 0,
-            file,
+            file: fd,
             cur: 0,
         }
     }
