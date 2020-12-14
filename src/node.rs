@@ -24,7 +24,7 @@ const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_PAI
 
 /// 内部节点的头格式 (共计 18 个字节)
 ///
-// 儿子节点与键的空间: PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE = 4096 - 18 = 4076 字节.
+/// 儿子节点与键的空间: PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE = 4096 - 18 = 4076 字节.
 const INTERNAL_NODE_NUM_CHILDREN_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
 const INTERNAL_NODE_NUM_CHILDREN_SIZE: usize = PTR_SIZE;
 const INTERNAL_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + INTERNAL_NODE_NUM_CHILDREN_SIZE;
@@ -115,8 +115,8 @@ impl Node {
         }
     }
 
-    /// get_key_value_pairs returns a list of key value pairs in case of a leaf node,
-    /// otherwise, returns an error.
+    /// get_key_value_pairs 如果是叶子节点，返回一个KeyValuePair的列表，
+    /// 否则返回一个Error
     pub fn get_key_value_pairs(&self) -> Result<Vec<KeyValuePair>, Error> {
         return match self.node_type {
             NodeType::Leaf => {
@@ -153,8 +153,8 @@ impl Node {
         };
     }
 
-    /// get_children returns a *vector of offsets in the index file* to children of a certain node in case of an internal node,
-    /// otherwise, returns an error.
+    /// get_children 如果是中间节点，返回一个孩子节点的 offset 列表，
+    /// 否则，返回错误
     pub fn get_children(&self) -> Result<Vec<usize>, Error> {
         return match self.node_type {
             NodeType::Internal => {
@@ -174,7 +174,7 @@ impl Node {
         };
     }
 
-    /// get_keys returns a A result which contains a vector with the keys contained in the node.
+    /// get_keys 返回一个包装有 Key 列表的 Result
     pub fn get_keys(&self) -> Result<Vec<String>, Error> {
         return match self.node_type {
             NodeType::Internal => {
@@ -183,7 +183,7 @@ impl Node {
                     .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
                 let mut result = Vec::<String>::new();
                 let mut offset = INTERNAL_NODE_HEADER_SIZE + num_children * PTR_SIZE;
-                // Number of keys is always one less than the number of children.
+                // 键数总是会比儿子数少一
                 let num_keys = num_children - 1;
                 for _i in 1..=num_keys {
                     let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
@@ -192,7 +192,7 @@ impl Node {
                         Err(_) => return Err(Error::UTF8Error),
                     };
                     offset += KEY_SIZE;
-                    // Trim leading or trailing zeros.
+                    // 去掉首尾 \0 字符
                     result.push(key.trim_matches(char::from(0)).to_string());
                 }
                 Ok(result)
@@ -208,7 +208,7 @@ impl Node {
                         Ok(key) => key,
                         Err(_) => return Err(Error::UTF8Error),
                     };
-                    // Skip the values; keys and values are bunched up together.
+                    // 跳过value
                     offset += KEY_SIZE + VALUE_SIZE;
                     res.push(key.trim_matches(char::from(0)).to_string());
                 }
@@ -218,8 +218,8 @@ impl Node {
         };
     }
 
-    /// add_key_value_pair adds a key value pair to self,
-    /// Intended for Leaf nodes only.
+    /// add_key_value_pair 增加一个键值对到 self ,
+    /// 只应当在叶子节点上使用.
     pub fn add_key_value_pair(&mut self, kv: KeyValuePair) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf => {
@@ -243,8 +243,8 @@ impl Node {
         }
     }
 
-    /// add key adds a key to self,
-    /// Intended for Internal nodes only.
+    /// 增加一个键,
+    /// 只应当在中间节点上使用.
     pub fn add_key(&mut self, key: String) -> Result<(), Error> {
         match self.node_type {
             NodeType::Internal => {
@@ -252,10 +252,10 @@ impl Node {
                     .page
                     .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
                 let mut offset = INTERNAL_NODE_HEADER_SIZE + (PTR_SIZE) * num_children;
-                // Update number of children. (eq number of keys + 1)
+                // 更新孩子数 (等于键数+1)
                 self.page
                     .write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, num_children + 1)?;
-                // Find placement for new key.
+                // 寻找新键的位置.
                 let num_keys = num_children - 1;
                 let end_key_data = num_keys * KEY_SIZE;
                 for _ in 1..=num_keys {
@@ -265,7 +265,7 @@ impl Node {
                         Err(_) => return Err(Error::UTF8Error),
                     };
                     if iter_key.to_owned() >= key {
-                        // Found the index to insert keys.
+                        // 找到位置.
                         self.page.insert_bytes_at_offset(
                             key.as_bytes(),
                             offset,
@@ -282,7 +282,7 @@ impl Node {
         Ok(())
     }
 
-    /// get_keys_len retrieves the number of keys in the node.
+    /// get_keys_len 获取当前节点的键数.
     pub fn get_keys_len(&self) -> Result<usize, Error> {
         match self.node_type {
             NodeType::Internal => {
@@ -297,7 +297,7 @@ impl Node {
         }
     }
 
-    /// get_keys returns a A result which contains a vector with the keys contained in the node.
+    /// get_keys 返回当前节点中包含键的键值对.
     pub fn find_key_value_pair(&self, key: String) -> Result<KeyValuePair, Error> {
         match self.node_type {
             NodeType::Leaf => {
@@ -313,7 +313,7 @@ impl Node {
         }
     }
 
-    /// splits the current node returning the median key and the two split nodes.
+    /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
     pub fn split(&self) -> Result<(String, Node, Node), Error> {
         match self.node_type {
             NodeType::Internal => {
@@ -345,7 +345,7 @@ impl Node {
                     offset += KEY_SIZE;
                 }
 
-                // TODO: create the left and right nodes here. append them to the index file.
+                // TODO: 在这里创建左右节点， 并将他们添加到索引文件
                 // let left_node = Node::new(node_type: NodeType::Internal,
                 //     offset: usize,
                 //     parent_offset: usize,
@@ -373,7 +373,7 @@ impl TryFrom<Node> for [u8; PAGE_SIZE] {
     }
 }
 
-// NodeSpec is a wrapper used to convert a page of bytes into a Node struct by implementing TryFrom.
+// NodeSpec 是一个包装。通过 TryFrom 将一个页的字节数组转换成 Node struct 来实现.
 pub struct NodeSpec {
     pub page_data: [u8; PAGE_SIZE],
     pub offset: usize,
@@ -411,13 +411,13 @@ mod tests {
     use std::convert::TryFrom;
 
     const PAGE_DATA: [u8; DATA_LEN] = [
-        0x01, // Is-Root byte.
-        0x01, // Node type byte.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Parent offset.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, // Number of children.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096  (2nd Page)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // 8192  (3rd Page)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, // 12288 (4th Page)
+        0x01, // 是否为根节点.
+        0x01, // 节点类型.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 父节点偏移.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, // 孩子节点数.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096  (第二页)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // 8192  (第三页)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, // 12288 (第四页)
         0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
         0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
     ];
@@ -479,7 +479,7 @@ mod tests {
         let page_data: [u8; DATA_LEN] = PAGE_DATA.clone();
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
 
-        // Concatenate the two arrays; page_data and junk.
+        // 连接 page_data 和 junk 两个数组.
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
             *to = *from
@@ -506,7 +506,7 @@ mod tests {
         let page_data: [u8; DATA_LEN] = PAGE_DATA.clone();
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
 
-        // Concatenate the two arrays; page_data and junk.
+        // 连接 page_data 和 junk 两个数组.
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
             *to = *from
@@ -539,10 +539,10 @@ mod tests {
     fn get_keys_work_for_leaf_node() -> Result<(), Error> {
         const DATA_LEN: usize = INTERNAL_NODE_HEADER_SIZE + 2 * KEY_SIZE + 2 * VALUE_SIZE;
         let page_data: [u8; DATA_LEN] = [
-            0x01, // Is-Root byte.
-            0x02, // Node type byte.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Parent offset.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // Number of Key-Value pairs.
+            0x01, // 是否为根节点
+            0x02, // 节点类型
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 父节点偏移
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // 儿子节点数
             0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
             0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
             0x66, 0x6f, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // "foo"
@@ -551,7 +551,7 @@ mod tests {
 
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
 
-        // Concatenate the two arrays; page_data and junk.
+        // 连接 page_data 和 junk 两个数组.
         let mut page = [0x00; PAGE_SIZE];
         for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
             *to = *from
