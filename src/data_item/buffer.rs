@@ -1,11 +1,11 @@
-use crate::page::{PAGE_SIZE, Page};
-use crate::error::Error;
 use std::collections::LinkedList;
-use std::time::SystemTime;
 use std::fs::{File, OpenOptions};
-use std::io::{SeekFrom, Seek, Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::time::SystemTime;
 
+use crate::page::page_item::{Page, PAGE_SIZE};
+use crate::util::error::Error;
 
 /// 缓冲区的trait，实现了通过缓冲区获取页、写入页、强制刷新页
 pub trait Buffer {
@@ -112,7 +112,6 @@ impl Buffer for LRUBuffer {
                 }
                 None => Err(Error::UnexpectedError)
             }
-
         }
     }
 
@@ -268,7 +267,6 @@ impl Buffer for ClockBuffer {
         }
 
         return Ok(page);
-
     }
 
     /// 向缓冲区写入一个页面

@@ -1,17 +1,13 @@
-use crate::table::Table;
-use crate::table::field::Field;
-use crate::error::Error;
-use crate::page::pager::Pager;
-use crate::table::booter::Booter;
+use std::collections::HashMap;
+use std::path::Path;
 
 use uuid::Uuid;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::path::Path;
-use std::borrow::Borrow;
-use std::intrinsics::type_name;
-use std::ops::Deref;
+
+use crate::page::pager::Pager;
+use crate::table::booter::Booter;
+use crate::table::field::Field;
 use crate::table::table_item::Table;
+use crate::util::error::Error;
 
 pub struct TableManager {
     pager: Pager,
@@ -28,12 +24,12 @@ impl TableManager {
         }
     }
 
-    pub fn create(path: Path, pager: Pager) -> Result<TableManager, Error> {
+    pub fn create(path: &Path, pager: Pager) -> Result<TableManager, Error> {
         let booter = Booter::create(path)?;
         Ok(TableManager::new(pager, booter))
     }
 
-    pub fn open(path: Path, pager: Pager) -> Result<TableManager, Error> {
+    pub fn open(path: &Path, pager: Pager) -> Result<TableManager, Error> {
         let booter = Booter::open(path)?;
         Ok(TableManager::new(pager, booter))
     }
@@ -41,7 +37,7 @@ impl TableManager {
     pub fn load_tables(&mut self) -> Result<(), Error> {
         let mut uuid = self.first_uuid()?;
         while uuid != Uuid::nil() {
-            let mut table = Table::load_table(self, uuid)?;
+            let table = Table::load_table(self, uuid)?;
             uuid = table.next_table;
             self.table_cache.insert(table.table_name.clone(), *table);
         }
@@ -61,7 +57,7 @@ impl TableManager {
         let raw_table = self.table_cache.get(table_name.as_str());
         match raw_table {
             Some(table) => {
-                Ok(*table.clone())
+                Ok(table.clone())
             }
             None => Err(Error::TableNotFound)
         }
@@ -80,14 +76,13 @@ impl TableManager {
     pub fn create_table(&mut self, table_to_create: Table) -> Result<(), Error> {
         let raw_table = self.table_cache.get(table_to_create.table_name.as_str());
         match raw_table {
-            Some(table) => return Err(Error::TableAlreadyExists),
+            Some(_table) => return Err(Error::TableAlreadyExists),
             None => ()
         };
 
-        let table = Table::create_table(self, self.first_uuid().clone()?, table_to_create)?;
-        self.update_first_uuid(table.self_uuid);
+        let table = Table::create_table(self, self.first_uuid()?.clone(), table_to_create)?;
+        self.update_first_uuid(table.self_uuid)?;
         self.table_cache.insert(table.table_name.clone(), table.clone());
         Ok(())
     }
-
 }
