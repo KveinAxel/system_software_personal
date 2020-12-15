@@ -147,18 +147,20 @@ impl Buffer for LRUBuffer {
     }
 
     /// 向文件填充占位符至指定页数
-    /// todo 只填充不覆盖
     fn fill_up_to(&mut self, file_name: &str, num_of_page: usize) -> Result<(), Error> {
         // 查询文件fd
         let raw_file = self.file.get_mut(file_name);
         match raw_file {
             Some(file) => {
-                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 {
+                file.seek(SeekFrom::Start(0))?;
+                let page_num = file.read_u32::<byteorder::BigEndian>()?;
+                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 || page_num as usize - INIT_FILE_PAGE_NUM < num_of_page{
                     return Err(Error::PageNumOutOfSize)
                 }
+
                 // 填充文件
-                file.seek(SeekFrom::Start((NON_DATA_PAGE * PAGE_SIZE) as u64))?;
-                file.write_all(Vec::<u8>::with_capacity(num_of_page * PAGE_SIZE).as_slice())?;
+                file.seek(SeekFrom::Start((page_num as usize * PAGE_SIZE) as u64))?;
+                file.write_all(Vec::<u8>::with_capacity((num_of_page - page_num as usize + INIT_FILE_PAGE_NUM) * PAGE_SIZE).as_slice())?;
 
                 // 更新文件头
                 file.seek(SeekFrom::Start(0))?;
@@ -167,8 +169,10 @@ impl Buffer for LRUBuffer {
                 // 第一页占用空间
                 file.write_u32::<byteorder::BigEndian>((PAGE_SIZE - (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32) as u32)?;
 
+
+                file.seek(SeekFrom::Start((1 + page_num as u64) * 32))?;
                 // 其余页占用空间
-                for _i in 1..=num_of_page+3 {
+                for _i in 1..=num_of_page - page_num as usize + INIT_FILE_PAGE_NUM {
                     file.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
                 }
 
@@ -461,27 +465,70 @@ impl ClockBuffer {
 
 impl Buffer for ClockBuffer {
     fn add_file(&mut self, path: &Path) -> Result<(), Error> {
-        let fd = OpenOptions::new()
+        // 创建文件
+        let mut fd = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(path)?;
+
+        // 初始化文件大小
+        fd.seek(SeekFrom::Start(0))?;
+        fd.write_all(Vec::<u8>::with_capacity(INIT_FILE_PAGE_NUM * PAGE_SIZE).as_slice())?;
+
+        // 填充文件头配置信息
+        // 文件页数
+        fd.seek(SeekFrom::Start(0))?;
+        fd.write_u32::<byteorder::BigEndian>(INIT_FILE_PAGE_NUM as u32)?;
+
+        // 文件页表
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32 - (32 * NON_DATA_PAGE + 32) as u32)?;
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
+
+        // 获取文件名
         let raw_file_name = path.to_str();
         let file_name = match raw_file_name {
             Some(file_name) => file_name,
             None => return Err(Error::FileNotFound)
         };
+
+        // 文件保存在哈希表中
         self.file.insert(String::from(file_name), fd);
         Ok(())
     }
 
     /// 向文件填充占位符至指定页数
     fn fill_up_to(&mut self, file_name: &str, num_of_page: usize) -> Result<(), Error> {
+        // 查询文件fd
         let raw_file = self.file.get_mut(file_name);
         match raw_file {
             Some(file) => {
                 file.seek(SeekFrom::Start(0))?;
-                file.write_all(Vec::<u8>::with_capacity(num_of_page * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE).as_slice())?;
+                let page_num = file.read_u32::<byteorder::BigEndian>()?;
+                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 || page_num as usize - INIT_FILE_PAGE_NUM < num_of_page{
+                    return Err(Error::PageNumOutOfSize)
+                }
+
+                // 填充文件
+                file.seek(SeekFrom::Start((page_num as usize * PAGE_SIZE) as u64))?;
+                file.write_all(Vec::<u8>::with_capacity((num_of_page - page_num as usize + INIT_FILE_PAGE_NUM) * PAGE_SIZE).as_slice())?;
+
+                // 更新文件头
+                file.seek(SeekFrom::Start(0))?;
+                file.write_u32::<byteorder::BigEndian>((INIT_FILE_PAGE_NUM + num_of_page) as u32)?;
+
+                // 第一页占用空间
+                file.write_u32::<byteorder::BigEndian>((PAGE_SIZE - (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32) as u32)?;
+
+
+                file.seek(SeekFrom::Start((1 + page_num as u64) * 32))?;
+                // 其余页占用空间
+                for _i in 1..=num_of_page - page_num as usize + INIT_FILE_PAGE_NUM {
+                    file.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
+                }
+
                 Ok(())
             }
             None => Err(Error::FileNotFound)
@@ -494,6 +541,8 @@ impl Buffer for ClockBuffer {
     /// 若缓冲区已满，则淘汰第一个遇到的access为0的页面，并将沿途access为1的页面置0，
     /// 新加载的页面的access置1
     fn get_page(&mut self, file_name: &str, page_num: usize) -> Result<Page, Error> {
+
+        // 查询缓冲区
         for i in self.list.iter_mut() {
             if i.page.file_name == file_name && i.page.page_num == page_num {
                 i.access = 1;
@@ -501,11 +550,13 @@ impl Buffer for ClockBuffer {
             }
         }
 
+        // 获取磁盘页数据
         let mut page: [u8; PAGE_SIZE] = [0x00; PAGE_SIZE];
         let file = self.file.get_mut(file_name).unwrap();
         file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
         file.read_exact(&mut page)?;
 
+        // 更新缓冲
         if self.len < self.buff_size {
             self.len += 1;
             self.list.push(ClockBufferItem {
@@ -514,25 +565,32 @@ impl Buffer for ClockBuffer {
             });
         } else {
             let mut new_cur: Option<usize> = None;
+
+            // 循环遍历缓冲区
             for i in 0..self.buff_size {
                 let item = &mut self.list[(self.cur + i) % self.buff_size];
+                // 将沿途为1的标志置0
                 if item.access == 1 {
                     item.access -= 1;
                 } else {
+                    // 不为1的标志淘汰
                     new_cur = Some((self.cur + i) % self.buff_size);
                     break;
                 }
             }
+            // 更新CLOCK指针
             self.cur = match new_cur {
                 Some(ind) => {
                     ind
                 }
                 None => self.cur
             };
+            // 刷新被淘汰页
             let prev_page = &self.list[self.cur].page;
             let f_name = prev_page.file_name.clone();
             let p_num = prev_page.page_num;
             self.flush(f_name.as_str(), &p_num)?;
+            // 更新缓冲
             self.list[self.cur] = ClockBufferItem {
                 page: Page::new(page, file_name, page_num),
                 access: 1,
@@ -544,40 +602,51 @@ impl Buffer for ClockBuffer {
 
     /// 向缓冲区写入一个页面, 需要确保page.page_num正确
     fn write_page(&mut self, page: Page) -> Result<(), Error> {
+        // 查询缓冲
         for i in &mut self.list {
             if i.page.page_num == page.page_num {
                 i.page = page;
                 return Ok(());
             }
         }
+        // 如果缓冲没命中
         return if self.len < self.buff_size {
             self.len += 1;
+            // 缓冲没满，直接加入缓冲
             self.list.push(ClockBufferItem {
                 page,
                 access: 1,
             });
             Ok(())
         } else {
+
             let mut new_cur: Option<usize> = None;
+
+            // 循环遍历缓冲区
             for i in 0..self.buff_size {
                 let item = &mut self.list[(self.cur + i) % self.buff_size];
+                // 将沿途标志置0
                 if item.access == 1 {
                     item.access -= 1;
                 } else {
+                    // 如果有0标志则淘汰
                     new_cur = Some((self.cur + i) % self.buff_size);
                     break;
                 }
             }
+            // 更新CLOCK指针
             self.cur = match new_cur {
                 Some(ind) => {
                     ind
                 }
                 None => self.cur
             };
+            // 刷新旧页
             let prev_page = &self.list[self.cur].page;
             let f_name = prev_page.file_name.clone();
             let p_num = prev_page.page_num;
             self.flush(f_name.as_str(), &p_num)?;
+            // 更新缓冲
             self.list[self.cur] = ClockBufferItem {
                 page,
                 access: 1,
