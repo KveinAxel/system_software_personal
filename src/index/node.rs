@@ -417,7 +417,7 @@ pub struct NodeSpec {
 impl TryFrom<NodeSpec> for Node {
     type Error = Error;
     fn try_from(spec: NodeSpec) -> Result<Self, Self::Error> {
-        let page = Page::new(spec.page_data);
+        let page = Page::new_phantom(spec.page_data);
         let is_root = spec.page_data[IS_ROOT_OFFSET].from_byte();
         let node_type = NodeType::from(spec.page_data[NODE_TYPE_OFFSET]);
         if node_type == NodeType::Unknown {

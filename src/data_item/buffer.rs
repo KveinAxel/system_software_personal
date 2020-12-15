@@ -3,7 +3,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::SystemTime;
-use test::NamePadding::PadNone;
 
 use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
@@ -273,7 +272,7 @@ impl Buffer for ClockBuffer {
         return Ok(Page::new(page, page_num));
     }
 
-    /// 向缓冲区写入一个页面
+    /// 向缓冲区写入一个页面, 需要确保page.page_num正确
     fn write_page(&mut self, page: Page) -> Result<(), Error> {
         for i in &mut self.list {
             if i.page.page_num == page.page_num {

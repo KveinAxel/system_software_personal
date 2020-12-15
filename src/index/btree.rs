@@ -3,9 +3,9 @@ use std::sync::{Arc, RwLock};
 
 use crate::index::key_value_pair::KeyValuePair;
 use crate::index::node::{Node, NodeSpec, NodeType};
-use crate::page::page_item::Page;
-use crate::util::error::Error;
+use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::page::pager::Pager;
+use crate::util::error::Error;
 
 /// B+树 配置
 pub const MAX_BRANCHING_FACTOR: usize = 200;
@@ -56,7 +56,7 @@ impl BTree {
             // 将对应页写入磁盘.
             return self
                 .pager
-                .write_page(Page::new(guarded_node.page.get_data()), &guarded_node.offset);
+                .write_page(Page::new(guarded_node.page.get_data(), guarded_node.page.page_num));
         }
         self.split_node(Arc::clone(&node))?;
         Ok(())
@@ -125,9 +125,10 @@ impl BTree {
                     None => return Err(Error::UnexpectedError),
                     Some(child_offset) => child_offset,
                 };
+                let page_num = child_offset / PAGE_SIZE;
                 let child_node = Node::try_from(NodeSpec {
                     offset: *child_offset,
-                    page_data: self.pager.get_page(child_offset)?,
+                    page_data: self.pager.get_page(&page_num)?.get_data(),
                 })?;
                 self.search_node(Arc::new(RwLock::new(child_node)), search_key)
             }
@@ -141,9 +142,11 @@ impl BTree {
             Ok(node) => node,
         };
         let keys = guarded_node.get_keys()?;
+        // todo
+        let page_num = guarded_node.parent_offset / PAGE_SIZE;
         let mut parent_node = Node::try_from(NodeSpec {
             offset: guarded_node.parent_offset,
-            page_data: self.pager.get_page(&guarded_node.parent_offset)?,
+            page_data: self.pager.get_page(&page_num)?.get_data(),
         })?;
         let median_key = &keys[keys.len() / 2];
         parent_node.add_key(median_key.to_string())
