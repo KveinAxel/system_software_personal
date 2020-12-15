@@ -59,7 +59,7 @@ pub trait Buffer {
 
     fn insert_bytes(&mut self, file_name: &str, bytes: &[u8]) -> Result<Position, Error>;
 
-    fn read_bytes(&mut self, pos: Position, size: usize) -> Result<&[u8], Error>;
+    fn read_bytes(&mut self, pos: Position, size: usize) -> Result<Vec<u8>, Error>;
 }
 
 
@@ -125,14 +125,14 @@ impl Buffer for LRUBuffer {
 
         // 填充文件头配置信息
         // 文件页数
-        fd.seek(SeekFrom::Start(0));
-        fd.write_u32(INIT_FILE_PAGE_NUM as u32);
+        fd.seek(SeekFrom::Start(0))?;
+        fd.write_u32::<byteorder::BigEndian>(INIT_FILE_PAGE_NUM as u32)?;
 
         // 文件页表
-        fd.write_u32(PAGE_SIZE as u32 - (32 * NON_DATA_PAGE + 32) as u32);
-        fd.write_u32(PAGE_SIZE as u32);
-        fd.write_u32(PAGE_SIZE as u32);
-        fd.write_u32(PAGE_SIZE as u32);
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32 - (32 * NON_DATA_PAGE + 32) as u32)?;
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
+        fd.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
 
         // 获取文件名
         let raw_file_name = path.to_str();
@@ -153,7 +153,7 @@ impl Buffer for LRUBuffer {
         let raw_file = self.file.get_mut(file_name);
         match raw_file {
             Some(file) => {
-                if PAGE_SIZE - (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 < 0 {
+                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 {
                     return Err(Error::PageNumOutOfSize)
                 }
                 // 填充文件
@@ -162,14 +162,14 @@ impl Buffer for LRUBuffer {
 
                 // 更新文件头
                 file.seek(SeekFrom::Start(0))?;
-                file.write_u32(INIT_FILE_PAGE_NUM as u32 + num_of_page)?;
+                file.write_u32::<byteorder::BigEndian>((INIT_FILE_PAGE_NUM + num_of_page) as u32)?;
 
                 // 第一页占用空间
-                file.write_u32((PAGE_SIZE - (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32) as u32);
+                file.write_u32::<byteorder::BigEndian>((PAGE_SIZE - (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32) as u32)?;
 
                 // 其余页占用空间
                 for _i in 1..=num_of_page+3 {
-                    file.write_u32(PAGE_SIZE as u32);
+                    file.write_u32::<byteorder::BigEndian>(PAGE_SIZE as u32)?;
                 }
 
                 Ok(())
@@ -360,54 +360,54 @@ impl Buffer for LRUBuffer {
         };
 
         file.seek(SeekFrom::Start(0))?;
-        let page_num = file.read_u32();
+        let page_num = file.read_u32::<byteorder::BigEndian>()?;
         let offset = 32 * INIT_FILE_PAGE_NUM;
-        for i in 0..&page_num as u64 {
+        for i in 0..page_num as u64 {
             file.seek(SeekFrom::Start(offset as u64 + i * 32))?;
-            let res = file.read_u32()?;
+            let res = file.read_u32::<byteorder::BigEndian>()?;
             if res > len as u32 {
                 // 找到插入位置并插入
-                file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + i * PAGE_SIZE + PAGE_SIZE - res) as u64))?;
-                file.write_all(bytes);
+                file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + i as usize * PAGE_SIZE + PAGE_SIZE - res as usize) as u64))?;
+                file.write_all(bytes)?;
 
                 // 更新文件头
                 file.seek(SeekFrom::Start(offset as u64 + i * 32))?;
-                file.write_u32(res - len);
-                Ok(Position {
+                file.write_u32::<byteorder::BigEndian>(res - len as u32)?;
+                return Ok(Position {
                     file_name: String::from(file_name),
                     page_num: i as usize,
-                    offset: PAGE_SIZE - res,
+                    offset: PAGE_SIZE - res as usize,
                 })
             }
         }
         // 如果文件不够大
         // 填充文件
-        self.fill_up_to(file_name, 2 * page_num);
+        self.fill_up_to(file_name, 2 * page_num as usize)?;
         // 重新插入
         self.insert_bytes(file_name, bytes)
     }
 
-    fn read_bytes(&mut self, pos: Position, size: usize) -> Result<&[u8], Error> {
+    fn read_bytes(&mut self, pos: Position, size: usize) -> Result<Vec<u8>, Error> {
         let raw_file = self.file.get_mut(&pos.file_name);
         let file = match raw_file {
             Some(file) => file,
             None => return Err(Error::FileNotFound)
         };
         file.seek(SeekFrom::Start(0))?;
-        let page_num = file.read_u32();
-        if pos.page_num + INIT_FILE_PAGE_NUM > *page_num {
+        let page_num = file.read_u32::<byteorder::BigEndian>()?;
+        if pos.page_num + INIT_FILE_PAGE_NUM > page_num as usize {
             return Err(Error::PageNumOutOfSize);
         }
         file.seek(SeekFrom::Start(((1 + INIT_FILE_PAGE_NUM + pos.page_num) * 32) as u64))?;
-        let res = file.read_u32();
-        if res + pos.offset > PAGE_SIZE {
+        let res = file.read_u32::<byteorder::BigEndian>()?;
+        if res as usize + pos.offset > PAGE_SIZE {
             return Err(Error::UnexpectedError);
         }
-        let page = [0; PAGE_SIZE];
-        file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + pos.page_num * PAGE_SIZE) as u64));
-        file.read_exact(&page);
+        let page = &mut [0; PAGE_SIZE];
+        file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + pos.page_num * PAGE_SIZE) as u64))?;
+        file.read_exact(page)?;
 
-        Ok(&page[pos.offset..pos.offset + size])
+        Ok(page[pos.offset..pos.offset + size].to_vec())
     }
 }
 
@@ -627,53 +627,53 @@ impl Buffer for ClockBuffer {
         };
 
         file.seek(SeekFrom::Start(0))?;
-        let page_num = file.read_u32();
+        let page_num = file.read_u32::<byteorder::BigEndian>()?;
         let offset = 32 * INIT_FILE_PAGE_NUM;
-        for i in 0..&page_num as u64 {
+        for i in 0..page_num as u64 {
             file.seek(SeekFrom::Start(offset as u64 + i * 32))?;
-            let res = file.read_u32()?;
+            let res = file.read_u32::<byteorder::BigEndian>()?;
             if res > len as u32 {
                 // 找到插入位置并插入
-                file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + i * PAGE_SIZE + PAGE_SIZE - res) as u64))?;
-                file.write_all(bytes);
+                file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + i as usize * PAGE_SIZE + PAGE_SIZE - res as usize) as u64))?;
+                file.write_all(bytes)?;
 
                 // 更新文件头
                 file.seek(SeekFrom::Start(offset as u64 + i * 32))?;
-                file.write_u32(res - len);
-                Ok(Position {
+                file.write_u32::<byteorder::BigEndian>(res - len as u32)?;
+                return Ok(Position {
                     file_name: String::from(file_name),
                     page_num: i as usize,
-                    offset: PAGE_SIZE - res,
+                    offset: PAGE_SIZE - res as usize,
                 })
             }
         }
         // 如果文件不够大
         // 填充文件
-        self.fill_up_to(file_name, 2 * page_num);
+        self.fill_up_to(file_name, 2 * page_num as usize)?;
         // 重新插入
         self.insert_bytes(file_name, bytes)
     }
 
-    fn read_bytes(&mut self, pos: Position, size: usize) -> Result<&[u8], Error> {
+    fn read_bytes(&mut self, pos: Position, size: usize) -> Result<Vec<u8>, Error> {
         let raw_file = self.file.get_mut(&pos.file_name);
         let file = match raw_file {
             Some(file) => file,
             None => return Err(Error::FileNotFound)
         };
         file.seek(SeekFrom::Start(0))?;
-        let page_num = file.read_u32();
-        if pos.page_num + INIT_FILE_PAGE_NUM > *page_num {
+        let page_num = file.read_u32::<byteorder::BigEndian>()?;
+        if pos.page_num + INIT_FILE_PAGE_NUM > page_num as usize {
             return Err(Error::PageNumOutOfSize);
         }
         file.seek(SeekFrom::Start(((1 + INIT_FILE_PAGE_NUM + pos.page_num) * 32) as u64))?;
-        let res = file.read_u32();
-        if res + pos.offset > PAGE_SIZE {
+        let res = file.read_u32::<byteorder::BigEndian>()?;
+        if res as usize + pos.offset > PAGE_SIZE {
             return Err(Error::UnexpectedError);
         }
-        let page = [0; PAGE_SIZE];
-        file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + pos.page_num * PAGE_SIZE) as u64));
-        file.read_exact(&page);
+        let page = &mut [0; PAGE_SIZE];
+        file.seek(SeekFrom::Start((INIT_FILE_PAGE_NUM * PAGE_SIZE + pos.page_num * PAGE_SIZE) as u64))?;
+        file.read_exact(page)?;
 
-        Ok(&page[pos.offset..pos.offset + size])
+        Ok(page[pos.offset..pos.offset + size].to_vec())
     }
 }
