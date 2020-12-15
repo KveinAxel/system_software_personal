@@ -8,6 +8,7 @@ pub enum Error {
     UTF8Error,
     NotInBufferError,
     TableNotFound,
+    FileNotFound,
 }
 
 impl std::convert::From<std::io::Error> for Error {

@@ -14,14 +14,16 @@ pub const NODE_KEYS_LIMIT: usize = MAX_BRANCHING_FACTOR - 1;
 
 /// B+树的定义
 pub struct BTree {
+    file_name: String,
     root: Arc<RwLock<Node>>,
     pager: Box<Pager>,
 }
 
 impl BTree {
     #[allow(dead_code)]
-    fn new(pager: Box<Pager>, root: Node) -> BTree {
+    fn new(pager: Box<Pager>, root: Node, file_name: String) -> BTree {
         BTree {
+            file_name,
             pager,
             root: Arc::new(RwLock::new(root)),
         }
@@ -56,7 +58,7 @@ impl BTree {
             // 将对应页写入磁盘.
             return self
                 .pager
-                .write_page(Page::new(guarded_node.page.get_data(), guarded_node.page.page_num));
+                .write_page(Page::new(guarded_node.page.get_data(), &guarded_node.page.file_name, guarded_node.page.page_num));
         }
         self.split_node(Arc::clone(&node))?;
         Ok(())
@@ -128,7 +130,7 @@ impl BTree {
                 let page_num = child_offset / PAGE_SIZE;
                 let child_node = Node::try_from(NodeSpec {
                     offset: *child_offset,
-                    page_data: self.pager.get_page(&page_num)?.get_data(),
+                    page_data: self.pager.get_page(self.file_name.as_str(), &page_num)?.get_data(),
                 })?;
                 self.search_node(Arc::new(RwLock::new(child_node)), search_key)
             }
@@ -146,7 +148,7 @@ impl BTree {
         let page_num = guarded_node.parent_offset / PAGE_SIZE;
         let mut parent_node = Node::try_from(NodeSpec {
             offset: guarded_node.parent_offset,
-            page_data: self.pager.get_page(&page_num)?.get_data(),
+            page_data: self.pager.get_page(self.file_name.as_str(), &page_num)?.get_data(),
         })?;
         let median_key = &keys[keys.len() / 2];
         parent_node.add_key(median_key.to_string())

@@ -1,12 +1,13 @@
-use std::collections::LinkedList;
+use std::collections::{HashMap, LinkedList};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::SystemTime;
 
+use uuid::Uuid;
+
 use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
-use uuid::Uuid;
 
 /// 缓冲区自己管理的配置页的索引
 pub const META_PAGE: usize = 1;
@@ -14,27 +15,41 @@ pub const META_PAGE: usize = 1;
 /// 保留的非数据页数(包括META_PAGE)
 pub const NON_DATA_PAGE: usize = 4;
 
+/// 全局配置文件的页数
+pub const METADATA_FILE_PAGE_NUM: usize = 4;
+pub const FIRST_UUID_OFFSET: usize = 0;
+
+/// 初始化文件的页大小
+pub const INIT_FILE_PAGE_NUM: usize = 4;
+
 /// 缓冲区的trait，实现了通过缓冲区获取页、写入页、强制刷新页
 pub trait Buffer {
-    fn fill_up_to(&mut self, num_of_page: usize) -> Result<(), Error>;
+    fn add_file(&mut self, path: &Path) -> Result<(), Error>;
 
-    fn get_page(&mut self, page_num: usize) -> Result<Page, Error>;
+    fn fill_up_to(&mut self, file_name: &str, num_of_page: usize) -> Result<(), Error>;
+
+    fn get_page(&mut self, file_name: &str, page_num: usize) -> Result<Page, Error>;
 
     fn write_page(&mut self, page: Page) -> Result<(), Error>;
 
-    fn flush(&mut self, page_num: usize) -> Result<(), Error>;
+    fn flush(&mut self, file_name: &str, page_num: &usize) -> Result<(), Error>;
 
-    fn get_first_uuid(&self) -> Result<Uuid, Error>;
+    fn get_first_uuid(&mut self) -> Result<Uuid, Error>;
 
     fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error>;
+
+    fn insert_bytes(&mut self, bytes: &[u8]) -> Result<(), Error>;
+
+    fn read_bytes(&mut self) -> Result<&[u8], Error>;
 }
+
 
 /// LRU算法实现的Buffer
 pub struct LRUBuffer {
     list: LinkedList<LRUBufferItem>,
     len: usize,
     buff_size: usize,
-    file: File,
+    file: HashMap<String, File>,
 }
 
 /// LRUBuffer中的每一项
@@ -45,66 +60,108 @@ struct LRUBufferItem {
 
 impl LRUBuffer {
     /// LRUBuffer的构造方法
-    pub fn new(path: &Path, buff_size: usize) -> Result<LRUBuffer, Error> {
+    pub fn new(buff_size: usize) -> Result<LRUBuffer, Error> {
+        let path = Path::new("metadata.db");
+        let mut hashmap = HashMap::<String, File>::new();
         let fd = OpenOptions::new()
-            .create(true)
             .read(true)
             .write(true)
-            .open(path)?;
-        println!("{}创建成功！", path.to_str().unwrap());
-        Ok(LRUBuffer {
+            .open(path);
+        match fd {
+            Ok(file) => {
+                hashmap.insert(String::from("metadata.db"), file);
+            }
+            Err(_) => {
+                let new_metadata = OpenOptions::new()
+                    .create(true)
+                    .read(true)
+                    .write(true)
+                    .open(path)?;
+                hashmap.insert(String::from("metadata.db"), new_metadata);
+            }
+        }
+        let mut res = LRUBuffer {
             list: LinkedList::<LRUBufferItem>::new(),
             len: 0,
             buff_size,
-            file: fd,
-        })
+            file: hashmap,
+        };
+        res.fill_up_to("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        Ok(res)
     }
 }
 
 impl Buffer for LRUBuffer {
+    fn add_file(&mut self, path: &Path) -> Result<(), Error> {
+        let mut fd = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        fd.seek(SeekFrom::Start(0))?;
+        fd.write_all(Vec::<u8>::with_capacity(INIT_FILE_PAGE_NUM * PAGE_SIZE).as_slice())?;
+
+        let raw_file_name = path.to_str();
+        let file_name = match raw_file_name {
+            Some(file_name) => file_name,
+            None => return Err(Error::FileNotFound)
+        };
+        self.file.insert(String::from(file_name), fd);
+        Ok(())
+    }
+
     /// 向文件填充占位符至指定页数
-    fn fill_up_to(&mut self, num_of_page: usize) -> Result<(), Error> {
-        self.file.seek(SeekFrom::Start(0))?;
-        self.file.write_all(Vec::<u8>::with_capacity(num_of_page * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE).as_slice())?;
-        return Ok(());
+    fn fill_up_to(&mut self, file_name: &str, num_of_page: usize) -> Result<(), Error> {
+        let raw_file = self.file.get_mut(file_name);
+        match raw_file {
+            Some(file) => {
+                file.seek(SeekFrom::Start(0))?;
+                file.write_all(Vec::<u8>::with_capacity(num_of_page * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE).as_slice())?;
+                Ok(())
+            }
+            None => Err(Error::FileNotFound)
+        }
     }
 
     /// 获取一个页
     /// 如果缓冲区有，直接从缓冲区拿
     /// 否则，加载一个磁盘页面到缓冲区
     /// 如果缓冲区已满，淘汰时间最早的页面
-    fn get_page(&mut self, page_num: usize) -> Result<Page, Error> {
+    fn get_page(&mut self, file_name: &str, page_num: usize) -> Result<Page, Error> {
         for i in self.list.iter_mut() {
-            if i.page.page_num == page_num {
+            if i.page.file_name == file_name && i.page.page_num == page_num {
                 i.time = SystemTime::now();
-                return Ok(Page::new(i.page.get_data(), page_num));
+                return Ok(Page::new(i.page.get_data(), file_name, page_num));
             }
         }
         let mut page: [u8; PAGE_SIZE] = [0x00; PAGE_SIZE];
-        self.file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
-        self.file.read_exact(&mut page)?;
+        let file = self.file.get_mut(file_name).unwrap();
+        file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
+        file.read_exact(&mut page)?;
         if self.len < self.buff_size {
             self.list.push_back(LRUBufferItem {
-                page: Page::new(page, page_num),
+                page: Page::new(page, file_name, page_num),
                 time: SystemTime::now(),
             });
             self.len += 1;
-            Ok(Page::new(page, page_num))
+            Ok(Page::new(page, file_name, page_num))
         } else {
             let mut min_time = SystemTime::now();
             let mut buffer_item: Option<&mut LRUBufferItem> = None;
             let mut min_time_page_num: Option<usize> = None;
+            let mut min_time_file_name: Option<String> = None;
             for i in self.list.iter() {
                 if min_time > i.time {
                     min_time = i.time;
                     min_time_page_num = Some(i.page.page_num);
+                    min_time_file_name = Some(i.page.file_name.clone());
                 }
             }
-            match min_time_page_num {
-                Some(item) => {
-                    self.flush(item)?
+            match (min_time_page_num, min_time_file_name) {
+                (Some(p_num), Some(f_name)) => {
+                    self.flush(f_name.as_str(), &p_num)?
                 }
-                None => return Err(Error::UnexpectedError)
+                (_, _) => return Err(Error::UnexpectedError)
             }
             for i in self.list.iter_mut() {
                 if min_time == i.time {
@@ -114,9 +171,9 @@ impl Buffer for LRUBuffer {
             }
             match buffer_item {
                 Some(item) => {
-                    item.page = Page::new(page, page_num);
+                    item.page = Page::new(page, file_name, page_num);
                     item.time = SystemTime::now();
-                    Ok(Page::new(page, page_num))
+                    Ok(Page::new(page, file_name, page_num))
                 }
                 None => Err(Error::UnexpectedError)
             }
@@ -126,7 +183,7 @@ impl Buffer for LRUBuffer {
     /// 向缓冲区写入一个页面
     fn write_page(&mut self, page: Page) -> Result<(), Error> {
         for i in &mut self.list {
-            if page.page_num == i.page.page_num {
+            if i.page.file_name == page.file_name && page.page_num == i.page.page_num {
                 i.page = page;
                 return Ok(());
             }
@@ -143,18 +200,20 @@ impl Buffer for LRUBuffer {
             let mut min_time = SystemTime::now();
             let mut buffer_item: Option<&mut LRUBufferItem> = None;
             let mut min_time_page_num: Option<usize> = None;
+            let mut min_time_file_name: Option<String> = None;
 
             for i in self.list.iter() {
                 if min_time > i.time {
                     min_time = i.time;
                     min_time_page_num = Some(i.page.page_num);
+                    min_time_file_name = Some(i.page.file_name.clone());
                 }
             }
-            match min_time_page_num {
-                Some(item) => {
-                    self.flush(item)?
+            match (min_time_page_num, min_time_file_name) {
+                (Some(p_num), Some(f_name)) => {
+                    self.flush(f_name.as_str(), &p_num)?
                 }
-                None => return Err(Error::UnexpectedError)
+                (_, _) => return Err(Error::UnexpectedError)
             };
             for i in self.list.iter_mut() {
                 if min_time == i.time {
@@ -174,23 +233,41 @@ impl Buffer for LRUBuffer {
 
     /// 强制刷新一个缓冲区的页面至磁盘
     /// 若页面不在缓冲区，则返回不在缓冲区异常
-    fn flush(&mut self, page_num: usize) -> Result<(), Error> {
+    fn flush(&mut self, file_name: &str, page_num: &usize) -> Result<(), Error> {
         for i in self.list.iter_mut() {
-            if i.page.page_num == page_num {
+            if i.page.file_name == file_name && i.page.page_num == *page_num {
                 i.time = SystemTime::now();
-                self.file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
-                self.file.write_all(&i.page.get_data())?;
+                let file = self.file.get_mut(file_name).unwrap();
+                file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
+                file.write_all(&i.page.get_data())?;
                 return Ok(());
             }
         }
         Err(Error::NotInBufferError)
     }
 
-    fn get_first_uuid(&self) -> Result<Uuid, Error> {
-        unimplemented!()
+    fn get_first_uuid(&mut self) -> Result<Uuid, Error> {
+        let page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        let bytes = page.get_ptr_from_offset(FIRST_UUID_OFFSET, 16);
+        let uuid = Uuid::from_slice(bytes);
+        match uuid {
+            Ok(uuid) => Ok(uuid),
+            _ => Err(Error::UnexpectedError)
+        }
     }
 
     fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
+        let mut page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        page.write_bytes_at_offset(uuid.as_bytes(), FIRST_UUID_OFFSET, 16)?;
+        self.write_page(page)?;
+        Ok(())
+    }
+
+    fn insert_bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    fn read_bytes(&mut self) -> Result<&[u8], Error> {
         unimplemented!()
     }
 }
@@ -199,7 +276,7 @@ impl Buffer for LRUBuffer {
 pub struct ClockBuffer {
     list: Vec<ClockBufferItem>,
     len: usize,
-    file: File,
+    file: HashMap<String, File>,
     cur: usize,
     buff_size: usize,
 }
@@ -211,28 +288,65 @@ struct ClockBufferItem {
 }
 
 impl ClockBuffer {
-    fn new(path: &Path, buff_size: usize) -> Result<ClockBuffer, Error> {
+    fn new(buff_size: usize) -> Result<ClockBuffer, Error> {
+        let path = Path::new("metadata.db");
+        let mut hashmap = HashMap::<String, File>::new();
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path);
+        match fd {
+            Ok(file) => {
+                hashmap.insert(String::from("metadata.db"), file);
+            }
+            Err(_) => {
+                let new_metadata = OpenOptions::new()
+                    .create(true)
+                    .read(true)
+                    .write(true)
+                    .open(path)?;
+                hashmap.insert(String::from("metadata.db"), new_metadata);
+            }
+        }
+        let mut res = ClockBuffer {
+            list: Vec::<ClockBufferItem>::new(),
+            len: 0,
+            buff_size,
+            file: hashmap,
+            cur: 0,
+        };
+        res.fill_up_to("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        Ok(res)
+    }
+}
+
+impl Buffer for ClockBuffer {
+    fn add_file(&mut self, path: &Path) -> Result<(), Error> {
         let fd = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(path)?;
-        Ok(ClockBuffer {
-            list: Vec::<ClockBufferItem>::new(),
-            len: 0,
-            buff_size,
-            file: fd,
-            cur: 0,
-        })
+        let raw_file_name = path.to_str();
+        let file_name = match raw_file_name {
+            Some(file_name) => file_name,
+            None => return Err(Error::FileNotFound)
+        };
+        self.file.insert(String::from(file_name), fd);
+        Ok(())
     }
-}
 
-impl Buffer for ClockBuffer {
-    /// 向文件填充占位符
-    fn fill_up_to(&mut self, num_of_page: usize) -> Result<(), Error> {
-        self.file.seek(SeekFrom::Start(0))?;
-        self.file.write_all(Vec::<u8>::with_capacity(num_of_page * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE).as_slice())?;
-        return Ok(());
+    /// 向文件填充占位符至指定页数
+    fn fill_up_to(&mut self, file_name: &str, num_of_page: usize) -> Result<(), Error> {
+        let raw_file = self.file.get_mut(file_name);
+        match raw_file {
+            Some(file) => {
+                file.seek(SeekFrom::Start(0))?;
+                file.write_all(Vec::<u8>::with_capacity(num_of_page * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE).as_slice())?;
+                Ok(())
+            }
+            None => Err(Error::FileNotFound)
+        }
     }
 
     /// 根据偏移获取一个页面
@@ -240,22 +354,23 @@ impl Buffer for ClockBuffer {
     /// 如果不在缓冲区，则加载一个磁盘页面至缓冲区
     /// 若缓冲区已满，则淘汰第一个遇到的access为0的页面，并将沿途access为1的页面置0，
     /// 新加载的页面的access置1
-    fn get_page(&mut self, page_num: usize) -> Result<Page, Error> {
+    fn get_page(&mut self, file_name: &str, page_num: usize) -> Result<Page, Error> {
         for i in self.list.iter_mut() {
-            if i.page.page_num == page_num {
+            if i.page.file_name == file_name && i.page.page_num == page_num {
                 i.access = 1;
-                return Ok(Page::new(i.page.get_data(), page_num));
+                return Ok(Page::new(i.page.get_data(), file_name, page_num));
             }
         }
 
         let mut page: [u8; PAGE_SIZE] = [0x00; PAGE_SIZE];
-        self.file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
-        self.file.read_exact(&mut page)?;
+        let file = self.file.get_mut(file_name).unwrap();
+        file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
+        file.read_exact(&mut page)?;
 
         if self.len < self.buff_size {
             self.len += 1;
             self.list.push(ClockBufferItem {
-                page: Page::new(page, page_num),
+                page: Page::new(page, file_name , page_num),
                 access: 1,
             });
         } else {
@@ -275,14 +390,17 @@ impl Buffer for ClockBuffer {
                 }
                 None => self.cur
             };
-            self.flush(self.cur)?;
+            let prev_page = &self.list[self.cur].page;
+            let f_name = prev_page.file_name.clone();
+            let p_num = prev_page.page_num;
+            self.flush(f_name.as_str(), &p_num)?;
             self.list[self.cur] = ClockBufferItem {
-                page: Page::new(page, page_num),
+                page: Page::new(page, file_name, page_num),
                 access: 1,
             };
         }
 
-        return Ok(Page::new(page, page_num));
+        return Ok(Page::new(page, file_name, page_num));
     }
 
     /// 向缓冲区写入一个页面, 需要确保page.page_num正确
@@ -317,7 +435,10 @@ impl Buffer for ClockBuffer {
                 }
                 None => self.cur
             };
-            self.flush(self.cur)?;
+            let prev_page = &self.list[self.cur].page;
+            let f_name = prev_page.file_name.clone();
+            let p_num = prev_page.page_num;
+            self.flush(f_name.as_str(), &p_num)?;
             self.list[self.cur] = ClockBufferItem {
                 page,
                 access: 1,
@@ -328,22 +449,40 @@ impl Buffer for ClockBuffer {
 
     /// 强制刷新一个缓冲区的页面至磁盘
     /// 若页面不在缓冲区，则返回不在缓冲区异常
-    fn flush(&mut self, page_num: usize) -> Result<(), Error> {
+    fn flush(&mut self, file_name: &str, page_num: &usize) -> Result<(), Error> {
         for i in self.list.iter() {
-            if i.page.page_num == page_num {
-                self.file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
-                self.file.write_all(&i.page.get_data())?;
+            if i.page.file_name == file_name && i.page.page_num == *page_num {
+                let file = self.file.get_mut(file_name).unwrap();
+                file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
+                file.write_all(&i.page.get_data())?;
                 return Ok(());
             }
         }
         Err(Error::NotInBufferError)
     }
 
-    fn get_first_uuid(&self) -> Result<Uuid, Error> {
-        unimplemented!()
+    fn get_first_uuid(&mut self) -> Result<Uuid, Error> {
+        let page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        let bytes = page.get_ptr_from_offset(FIRST_UUID_OFFSET, 16);
+        let uuid = Uuid::from_slice(bytes);
+        match uuid {
+            Ok(uuid) => Ok(uuid),
+            _ => Err(Error::UnexpectedError)
+        }
     }
 
     fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
-        unimplemented!()
+        let mut page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        page.write_bytes_at_offset(uuid.as_bytes(), FIRST_UUID_OFFSET, 16)?;
+        self.write_page(page)?;
+        Ok(())
+    }
+
+    fn insert_bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        Err(Error::UnexpectedError)
+    }
+
+    fn read_bytes(&mut self) -> Result<&[u8], Error> {
+        Err(Error::UnexpectedError)
     }
 }

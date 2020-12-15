@@ -39,14 +39,17 @@ impl Table {
         }
     }
 
+    /// todo
     pub fn load_table(tbm: &TableManager, uuid: Uuid) -> Result<Box<Table>, Error> {
         Err(Error::UnexpectedError)
     }
 
+    /// todo
     pub fn insert(&mut self, field: Field) -> Result<(), Error> {
         Err(Error::UnexpectedError)
     }
 
+    /// todo
     pub fn create_table(tbm: &TableManager, uuid: Uuid, table: Table) -> Result<Table, Error> {
         Err(Error::UnexpectedError)
     }

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use uuid::Uuid;
 
@@ -31,7 +30,7 @@ impl TableManager {
         Ok(())
     }
 
-    pub fn first_uuid(&self) -> Result<Uuid, Error> {
+    pub fn first_uuid(&mut self) -> Result<Uuid, Error> {
         let uuid = self.pager.get_first_uuid()?;
         Ok(uuid)
     }
@@ -67,7 +66,8 @@ impl TableManager {
             None => ()
         };
 
-        let table = Table::create_table(self, self.first_uuid()?.clone(), table_to_create)?;
+        let uuid = self.first_uuid()?.clone();
+        let table = Table::create_table(self, uuid, table_to_create)?;
         self.update_first_uuid(table.self_uuid)?;
         self.table_cache.insert(table.table_name.clone(), table.clone());
         Ok(())
