@@ -2,10 +2,12 @@
 pub enum Error {
     KeyNotFound,
     KeyAlreadyExists,
+    TableAlreadyExists,
     UnexpectedError,
     TryFromSliceError(&'static str),
     UTF8Error,
     NotInBufferError,
+    TableNotFound,
 }
 
 impl std::convert::From<std::io::Error> for Error {
