@@ -1,6 +1,7 @@
 use crate::data_item::buffer::Buffer;
 use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
+use uuid::Uuid;
 
 /// 每个 Pager 管理一个文件
 pub struct Pager {
@@ -24,6 +25,14 @@ impl Pager {
     /// 向文件写入一个页
     pub fn write_page(&mut self, page: Page) -> Result<(), Error> {
         self.buffer.write_page(page)
+    }
+
+    pub fn get_first_uuid(&self) -> Result<Uuid, Error> {
+        self.buffer.get_first_uuid()
+    }
+
+    pub fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
+        self.buffer.update_first_uuid(uuid)
     }
 }
 

@@ -4,34 +4,21 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::page::pager::Pager;
-use crate::table::booter::Booter;
 use crate::table::field::Field;
 use crate::table::table_item::Table;
 use crate::util::error::Error;
 
 pub struct TableManager {
     pager: Pager,
-    booter: Booter,
     table_cache: HashMap<String, Table>,
 }
 
 impl TableManager {
-    pub fn new(pager: Pager, booter: Booter) -> TableManager {
+    pub fn new(pager: Pager) -> TableManager {
         TableManager {
             pager,
-            booter,
             table_cache: HashMap::<String, Table>::new(),
         }
-    }
-
-    pub fn create(path: &Path, pager: Pager) -> Result<TableManager, Error> {
-        let booter = Booter::create(path)?;
-        Ok(TableManager::new(pager, booter))
-    }
-
-    pub fn open(path: &Path, pager: Pager) -> Result<TableManager, Error> {
-        let booter = Booter::open(path)?;
-        Ok(TableManager::new(pager, booter))
     }
 
     pub fn load_tables(&mut self) -> Result<(), Error> {
@@ -45,12 +32,12 @@ impl TableManager {
     }
 
     pub fn first_uuid(&self) -> Result<Uuid, Error> {
-        let uuid = self.booter.load()?;
+        let uuid = self.pager.get_first_uuid()?;
         Ok(uuid)
     }
 
     pub fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
-        self.booter.update(uuid)
+        self.pager.update_first_uuid(uuid)
     }
 
     pub fn read(&self, table_name: String) -> Result<Table, Error> {

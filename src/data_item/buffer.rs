@@ -6,12 +6,13 @@ use std::time::SystemTime;
 
 use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
+use uuid::Uuid;
 
 /// 缓冲区自己管理的配置页的索引
 pub const META_PAGE: usize = 1;
 
 /// 保留的非数据页数(包括META_PAGE)
-pub const NON_DATA_PAGE: usize = 10;
+pub const NON_DATA_PAGE: usize = 4;
 
 /// 缓冲区的trait，实现了通过缓冲区获取页、写入页、强制刷新页
 pub trait Buffer {
@@ -22,6 +23,10 @@ pub trait Buffer {
     fn write_page(&mut self, page: Page) -> Result<(), Error>;
 
     fn flush(&mut self, page_num: usize) -> Result<(), Error>;
+
+    fn get_first_uuid(&self) -> Result<Uuid, Error>;
+
+    fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error>;
 }
 
 /// LRU算法实现的Buffer
@@ -180,6 +185,14 @@ impl Buffer for LRUBuffer {
         }
         Err(Error::NotInBufferError)
     }
+
+    fn get_first_uuid(&self) -> Result<Uuid, Error> {
+        unimplemented!()
+    }
+
+    fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
+        unimplemented!()
+    }
 }
 
 /// 采用时钟算法实现的Buffer
@@ -324,5 +337,13 @@ impl Buffer for ClockBuffer {
             }
         }
         Err(Error::NotInBufferError)
+    }
+
+    fn get_first_uuid(&self) -> Result<Uuid, Error> {
+        unimplemented!()
+    }
+
+    fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
+        unimplemented!()
     }
 }
