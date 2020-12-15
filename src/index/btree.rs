@@ -20,7 +20,6 @@ pub struct BTree {
 }
 
 impl BTree {
-    #[allow(dead_code)]
     fn new(pager: Box<Pager>, root: Node, file_name: String) -> BTree {
         BTree {
             file_name,
@@ -153,22 +152,5 @@ impl BTree {
         let median_key = &keys[keys.len() / 2];
         parent_node.add_key(median_key.to_string())
         // todo 分裂两个节点，并建立索引
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::util::error::Error;
-
-    #[test]
-    fn search_works() -> Result<(), Error> {
-        // TODO: write this.
-        Ok(())
-    }
-
-    #[test]
-    fn insert_works() -> Result<(), Error> {
-        // TODO: write this.
-        Ok(())
     }
 }
