@@ -9,6 +9,7 @@ pub enum Error {
     NotInBufferError,
     TableNotFound,
     FileNotFound,
+    PageNumOutOfSize,
 }
 
 impl std::convert::From<std::io::Error> for Error {
