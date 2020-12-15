@@ -1,10 +1,12 @@
 use crate::error::Error;
-use crate::key_value_pair::KeyValuePair;
+use crate::index::key_value_pair::KeyValuePair;
 use crate::node::{Node, NodeSpec, NodeType};
-use crate::pager::Pager;
+use crate::page::pager::Pager;
 use std::convert::TryFrom;
 use std::sync::{Arc, RwLock};
 use crate::page::Page;
+use crate::index::node::{Node, NodeSpec, NodeType};
+use crate::util::error::Error;
 
 /// B+树 配置
 pub const MAX_BRANCHING_FACTOR: usize = 200;
@@ -154,6 +156,7 @@ impl BTree {
 #[cfg(test)]
 mod tests {
     use crate::error::Error;
+    use crate::util::error::Error;
 
     #[test]
     fn search_works() -> Result<(), Error> {

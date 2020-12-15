@@ -1,6 +1,7 @@
 use std::path::Path;
 use crate::error::Error;
 use uuid::Uuid;
+use crate::util::error::Error;
 
 pub struct Booter {
 

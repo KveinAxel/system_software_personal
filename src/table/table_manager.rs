@@ -1,8 +1,8 @@
 use crate::table::Table;
-use crate::field::Field;
+use crate::table::field::Field;
 use crate::error::Error;
-use crate::pager::Pager;
-use crate::booter::Booter;
+use crate::page::pager::Pager;
+use crate::table::booter::Booter;
 
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -11,6 +11,7 @@ use std::path::Path;
 use std::borrow::Borrow;
 use std::intrinsics::type_name;
 use std::ops::Deref;
+use crate::table::table_item::Table;
 
 pub struct TableManager {
     pager: Pager,

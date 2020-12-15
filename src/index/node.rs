@@ -1,9 +1,12 @@
 use crate::btree::MAX_BRANCHING_FACTOR;
 use crate::error::Error;
-use crate::key_value_pair::KeyValuePair;
+use crate::index::key_value_pair::KeyValuePair;
 use crate::page::{Page, PAGE_SIZE, PTR_SIZE};
 use std::convert::TryFrom;
 use std::str;
+use crate::util::error::Error;
+use crate::page::pager::{PTR_SIZE, PAGE_SIZE, Page};
+use crate::index::btree::MAX_BRANCHING_FACTOR;
 
 /// 通用的节点头的格式 (共计 10 个字节)
 const IS_ROOT_SIZE: usize = 1;
@@ -443,6 +446,9 @@ mod tests {
     };
     use crate::page::PAGE_SIZE;
     use std::convert::TryFrom;
+    use crate::index::node::{LEAF_NODE_HEADER_SIZE, KEY_SIZE, NodeSpec, VALUE_SIZE, INTERNAL_NODE_HEADER_SIZE};
+    use crate::page::pager::{PAGE_SIZE, PTR_SIZE};
+    use crate::util::error::Error;
 
     #[test]
     fn page_to_node_works() -> Result<(), Error> {
@@ -463,7 +469,7 @@ mod tests {
 
         let offset = PAGE_SIZE * 2;
         let node = Node::try_from(NodeSpec {
-            offset: offset,
+            offset,
             page_data: page,
         })?;
 
@@ -492,7 +498,7 @@ mod tests {
 
         let offset = PAGE_SIZE * 2;
         let node = Node::try_from(NodeSpec {
-            offset: offset,
+            offset,
             page_data: page,
         })?;
         let kv = node.get_key_value_pairs()?;
@@ -533,7 +539,7 @@ mod tests {
 
         let offset = 0;
         let node = Node::try_from(NodeSpec {
-            offset: offset,
+            offset,
             page_data: page,
         })?;
         let children = node.get_children()?;
@@ -570,7 +576,7 @@ mod tests {
 
         let offset = 0;
         let node = Node::try_from(NodeSpec {
-            offset: offset,
+            offset,
             page_data: page,
         })?;
         let keys = node.get_keys()?;
@@ -615,7 +621,7 @@ mod tests {
 
         let offset = 0;
         let node = Node::try_from(NodeSpec {
-            offset: offset,
+            offset,
             page_data: page,
         })?;
 
