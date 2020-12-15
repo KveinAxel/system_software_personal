@@ -8,6 +8,10 @@ pub mod node;
 pub mod page;
 pub mod pager;
 pub mod buffer;
+pub mod table_manager;
+pub mod table;
+pub mod field;
+pub mod booter;
 
 fn main() {
     // 创建缓冲区
