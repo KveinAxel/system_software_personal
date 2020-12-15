@@ -15,15 +15,26 @@ pub struct Value(usize);
 /// 对单页内存数据的包装
 /// 提供一些方便的接口
 pub struct Page {
+    pub(crate) page_num: usize,
     data: Box<[u8; PAGE_SIZE]>,
 }
 
 impl Page {
-    pub fn new(data: [u8; PAGE_SIZE]) -> Page {
+    pub fn new_phantom(data: [u8; PAGE_SIZE]) -> Page {
         Page {
+            page_num: 0, // 0为孤立页面，不放在缓冲池、磁盘内
             data: Box::new(data),
         }
     }
+
+    pub fn new(data: [u8; PAGE_SIZE], page_num: usize) -> Page {
+        Page {
+            page_num, // 0为孤立页面，不放在缓冲池、磁盘内
+            data: Box::new(data),
+        }
+    }
+
+
 
     /// 向指定偏移写入一个值
     /// 覆盖指定偏移上的值
