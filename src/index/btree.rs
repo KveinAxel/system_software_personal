@@ -78,6 +78,20 @@ impl BTree {
         guarded_node.update_value(kv)
     }
 
+    /// 查找并删除满足key的叶子节点
+    pub fn delete(&mut self, key: String) -> Result<(), Error> {
+        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &key)?;
+        match kv_pair_exists {
+            None => return Err(Error::KeyNotFound),
+            Some(_) => ()
+        }
+        let mut guarded_node = match node.write() {
+            Err(_) => return Err(Error::UnexpectedError),
+            Ok(node) => node
+        };
+        guarded_node.delete()
+    }
+
     /// search_node 以当前节点为根的子树递归查询一个键
     /// 使用 pager 来获取页来遍历子树
     /// 如果遍历了所有的叶子节点，还没有找到对应的键

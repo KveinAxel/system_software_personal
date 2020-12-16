@@ -11,9 +11,11 @@ const IS_ROOT_SIZE: usize = 1;
 const IS_ROOT_OFFSET: usize = 0;
 const NODE_TYPE_SIZE: usize = 1;
 const NODE_TYPE_OFFSET: usize = 1;
-const PARENT_POINTER_OFFSET: usize = 2;
+const VALID_SIZE: usize = 1;
+const VALID_OFFSET: usize = 2;
 const PARENT_POINTER_SIZE: usize = PTR_SIZE;
-const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+const PARENT_POINTER_OFFSET: usize = 3;
+const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE + VALID_SIZE;
 
 /// 叶子节点的头格式 (共计 18 个字节)
 ///
@@ -95,6 +97,7 @@ pub struct Node {
     pub node_type: NodeType,
     pub parent_offset: usize,
     pub is_root: bool,
+    pub valid: bool,
     pub offset: usize,
     pub page: Page,
 }
@@ -106,6 +109,7 @@ impl Node {
         offset: usize,
         is_root: bool,
         page: Page,
+        valid: bool,
     ) -> Node {
         Node {
             node_type,
@@ -113,6 +117,7 @@ impl Node {
             offset,
             is_root,
             page,
+            valid,
         }
     }
 
@@ -122,7 +127,12 @@ impl Node {
         return match self.node_type {
             NodeType::Leaf => {
                 let mut res = Vec::<KeyValuePair>::new();
-                let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
+                let mut offset = VALID_OFFSET;
+                let valid = self.page.get_ptr_from_offset(offset, VALID_SIZE)[0].from_byte();
+                if valid != true {
+                    return Err(Error::UnexpectedError);
+                }
+                offset = LEAF_NODE_NUM_PAIRS_OFFSET;
                 let num_keys_val_pairs = self.page.get_value_from_offset(offset)?;
 
                 offset = LEAF_NODE_HEADER_SIZE;
@@ -318,7 +328,13 @@ impl Node {
     pub fn update_value(&mut self, kv: KeyValuePair) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf => {
-                let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
+                let mut offset = VALID_OFFSET;
+                let valid = self.page.get_ptr_from_offset(offset, VALID_SIZE)[0].from_byte();
+                match valid {
+                    true => (),
+                    _ => return Err(Error::UnexpectedError)
+                }
+                offset = LEAF_NODE_NUM_PAIRS_OFFSET;
                 let num_keys_val_pairs = self.page.get_value_from_offset(offset)?;
 
                 offset = LEAF_NODE_HEADER_SIZE;
@@ -391,6 +407,18 @@ impl Node {
             NodeType::Unknown => Err(Error::UnexpectedError),
         }
     }
+
+    /// 将叶子节点的有效位置零
+    /// 非叶子节点抛出异常
+    pub fn delete(&mut self) -> Result<(), Erorr> {
+        return match self.node_type {
+            NodeType::Leaf => {
+                let offset = VALID_OFFSET;
+                self.page.write_bytes_at_offset(&[true.to_byte()], offset, VALID_SIZE)
+            }
+            _ => Err(Error::UnexpectedError)
+        };
+    }
 }
 
 impl TryFrom<Node> for [u8; PAGE_SIZE] {
@@ -416,6 +444,7 @@ impl TryFrom<NodeSpec> for Node {
     fn try_from(spec: NodeSpec) -> Result<Self, Self::Error> {
         let page = Page::new_phantom(spec.page_data);
         let is_root = spec.page_data[IS_ROOT_OFFSET].from_byte();
+        let valid = spec.page_data[VALID_OFFSET].from_byte();
         let node_type = NodeType::from(spec.page_data[NODE_TYPE_OFFSET]);
         if node_type == NodeType::Unknown {
             return Err(Error::UnexpectedError);
@@ -428,6 +457,7 @@ impl TryFrom<NodeSpec> for Node {
             spec.offset,
             is_root,
             page,
+            valid,
         ));
     }
 }
@@ -436,8 +466,7 @@ impl TryFrom<NodeSpec> for Node {
 mod tests {
     use std::convert::TryFrom;
 
-    use crate::index::node::{INTERNAL_NODE_HEADER_SIZE, KEY_SIZE, LEAF_NODE_HEADER_SIZE, NodeSpec, VALUE_SIZE, Node};
-
+    use crate::index::node::{INTERNAL_NODE_HEADER_SIZE, KEY_SIZE, LEAF_NODE_HEADER_SIZE, Node, NodeSpec, VALUE_SIZE};
     use crate::page::page_item::{PAGE_SIZE, PTR_SIZE};
     use crate::util::error::Error;
 
