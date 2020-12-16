@@ -34,5 +34,9 @@ impl Pager {
     pub fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
         self.buffer.update_first_uuid(uuid)
     }
+
+    pub fn get_new_page(&mut self) -> Result<Page, Error> {
+        unimplemented!()
+    }
 }
 
