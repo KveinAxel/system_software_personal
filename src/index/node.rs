@@ -13,11 +13,9 @@ const IS_ROOT_SIZE: usize = 1;
 const IS_ROOT_OFFSET: usize = 0;
 const NODE_TYPE_SIZE: usize = 1;
 const NODE_TYPE_OFFSET: usize = 1;
-const VALID_SIZE: usize = 1;
-const VALID_OFFSET: usize = 2;
 const PARENT_POINTER_SIZE: usize = PTR_SIZE;
-const PARENT_POINTER_OFFSET: usize = 3;
-const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE + VALID_SIZE;
+const PARENT_POINTER_OFFSET: usize = 2;
+const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
 
 /// 叶子节点的头格式 (共计 18 个字节)
 ///
@@ -26,13 +24,17 @@ const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_PO
 const LEAF_NODE_NUM_PAIRS_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
 const LEAF_NODE_NUM_PAIRS_SIZE: usize = PTR_SIZE;
 const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_PAIRS_SIZE;
+const LEAF_NODE_MAX_KEY_VALUE_PAIRS: usize = 10;
 
-/// 内部节点的头格式 (共计 18 个字节)
+/// 内部节点的头格式 (共计 26 个字节)
 ///
-/// 儿子节点与键的空间: PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE = 4096 - 18 = 4076 字节.
+/// 儿子节点与键的空间: PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE = 4096 - 26 = 4070 字节.
 const INTERNAL_NODE_NUM_CHILDREN_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
 const INTERNAL_NODE_NUM_CHILDREN_SIZE: usize = PTR_SIZE;
-const INTERNAL_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + INTERNAL_NODE_NUM_CHILDREN_SIZE;
+const INTERNAL_NODE_NUM_KEY_OFFSET: usize = INTERNAL_NODE_NUM_CHILDREN_OFFSET + PTR_SIZE;
+const INTERNAL_NODE_NUM_KEY_SIZE: usize = PTR_SIZE;
+const INTERNAL_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + INTERNAL_NODE_NUM_CHILDREN_SIZE + INTERNAL_NODE_NUM_KEY_SIZE;
+
 
 /// 在一个 64 位机上存储儿子指针数的最大值
 /// 是 200 * 8 = 1600 字节
@@ -42,9 +44,9 @@ const INTERNAL_NODE_CHILDREN_OFFSET: usize = INTERNAL_NODE_HEADER_SIZE;
 const MAX_SPACE_FOR_CHILDREN: usize = (MAX_BRANCHING_FACTOR + 1) * PTR_SIZE;
 
 
-/// 这留下了 2476 个字节给中间节点的键:
-/// 我们用 2388 字节给键并且将剩下的88字节视为垃圾.
-/// 这意味着每个键被限制为 12 字节. (2476 / keys limit(199) ~= 12)
+/// 这留下了 2470 个字节给中间节点的键:
+/// 我们用 2388 字节给键并且将剩下的 82 字节视为垃圾.
+/// 这意味着每个键被限制为 12 字节. (2470 / keys limit(199) ~= 12)
 /// 向下取整到 10 来容纳叶子节点.
 const INTERNAL_NODE_KEY_OFFSET: usize = INTERNAL_NODE_CHILDREN_OFFSET + MAX_SPACE_FOR_CHILDREN;
 const MAX_SPACE_FOR_KEYS: usize = PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE - MAX_SPACE_FOR_CHILDREN;
@@ -104,29 +106,35 @@ pub struct Node {
     pub node_type: NodeType,
     pub parent_offset: usize,
     pub is_root: bool,
-    pub valid: bool,
     pub offset: usize,
     pub page: Page,
 }
 
 impl Node {
-    /// todo 写入配置信息
     pub fn new(
         node_type: NodeType,
         parent_offset: usize,
         offset: usize,
         is_root: bool,
-        page: Page,
-        valid: bool,
-    ) -> Node {
-        Node {
+        mut page: Page,
+    ) -> Result<Node, Error> {
+        match node_type {
+            NodeType::Internal => {
+                page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, 0)?;
+                page.write_value_at_offset(INTERNAL_NODE_KEY_OFFSET, 0)?;
+            }
+            NodeType::Leaf => {
+                page.write_value_at_offset(LEAF_NODE_NUM_PAIRS_OFFSET, 0)?;
+            }
+            _ => return Err(Error::UnexpectedError)
+        }
+        Ok(Node {
             node_type,
             parent_offset,
             offset,
             is_root,
             page,
-            valid,
-        }
+        })
     }
 
     /// get_key_value_pairs 如果是叶子节点，返回一个KeyValuePair的列表，
@@ -135,12 +143,7 @@ impl Node {
         return match self.node_type {
             NodeType::Leaf => {
                 let mut res = Vec::<KeyValuePair>::new();
-                let mut offset = VALID_OFFSET;
-                let valid = self.page.get_ptr_from_offset(offset, VALID_SIZE)[0].from_byte();
-                if valid != true {
-                    return Err(Error::UnexpectedError);
-                }
-                offset = LEAF_NODE_NUM_PAIRS_OFFSET;
+                let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
                 let num_keys_val_pairs = self.page.get_value_from_offset(offset)?;
 
                 offset = LEAF_NODE_HEADER_SIZE;
@@ -160,7 +163,7 @@ impl Node {
                     };
                     offset += VALUE_SIZE;
 
-                    // Trim leading or trailing zeros.
+                    // 去除首位0字符
                     res.push(KeyValuePair::new(
                         key.trim_matches(char::from(0)).to_string(),
                         value.trim_matches(char::from(0)).to_string(),
@@ -177,11 +180,9 @@ impl Node {
     pub fn get_children(&self) -> Result<Vec<usize>, Error> {
         return match self.node_type {
             NodeType::Internal => {
-                let num_children = self
-                    .page
-                    .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
+                let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
                 let mut result = Vec::<usize>::new();
-                let mut offset = INTERNAL_NODE_HEADER_SIZE;
+                let mut offset = INTERNAL_NODE_CHILDREN_OFFSET;
                 for _i in 1..=num_children {
                     let child_offset = self.page.get_value_from_offset(offset)?;
                     result.push(child_offset);
@@ -197,13 +198,9 @@ impl Node {
     pub fn get_keys(&self) -> Result<Vec<String>, Error> {
         return match self.node_type {
             NodeType::Internal => {
-                let num_children = self
-                    .page
-                    .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
                 let mut result = Vec::<String>::new();
-                let mut offset = INTERNAL_NODE_HEADER_SIZE + num_children * PTR_SIZE;
-                // 键数总是会比儿子数少一
-                let num_keys = num_children - 1;
+                let mut offset = INTERNAL_NODE_KEY_OFFSET;
+                let num_keys = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
                 for _i in 1..=num_keys {
                     let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
                     let key = match str::from_utf8(key_raw) {
@@ -242,20 +239,19 @@ impl Node {
     pub fn add_key_value_pair(&mut self, kv: KeyValuePair) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf => {
-                let num_keys_val_pairs = self
-                    .page
-                    .get_value_from_offset(LEAF_NODE_NUM_PAIRS_OFFSET)?;
+                let num_keys_val_pairs = self.page.get_value_from_offset(LEAF_NODE_NUM_PAIRS_OFFSET)?;
+                if num_keys_val_pairs >= LEAF_NODE_MAX_KEY_VALUE_PAIRS {
+                    return Err(Error::UnexpectedError);
+                }
                 let offset = LEAF_NODE_HEADER_SIZE + (KEY_SIZE + VALUE_SIZE) * num_keys_val_pairs;
-                // Update number of key value pairs.
-                self.page
-                    .write_value_at_offset(LEAF_NODE_NUM_PAIRS_OFFSET, num_keys_val_pairs + 1)?;
-                // Write the key.
+                // 更新键值对数
+                self.page.write_value_at_offset(LEAF_NODE_NUM_PAIRS_OFFSET, num_keys_val_pairs + 1)?;
+
+                // 写入键值对
                 let key_raw = kv.key.as_bytes();
                 self.page.write_bytes_at_offset(key_raw, offset, KEY_SIZE)?;
-                // Write the value.
                 let value_raw = kv.value.as_bytes();
-                self.page
-                    .write_bytes_at_offset(value_raw, offset + KEY_SIZE, VALUE_SIZE)?;
+                self.page.write_bytes_at_offset(value_raw, offset + KEY_SIZE, VALUE_SIZE)?;
                 Ok(())
             }
             _ => return Err(Error::UnexpectedError),
@@ -267,16 +263,16 @@ impl Node {
     pub fn add_key_and_left_child(&mut self, key: String, left_child_offset: usize) -> Result<(), Error> {
         return match self.node_type {
             NodeType::Internal => {
-                let num_children = self
-                    .page
-                    .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
-                let mut offset = INTERNAL_NODE_KEY_OFFSET;
                 // 更新孩子数 (等于键数+1)
-                self.page
-                    .write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, num_children + 1)?;
+                let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
+                self.page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, num_children + 1)?;
+
                 // 寻找新键的位置.
-                let num_keys = num_children - 1;
+                let num_keys = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
+
+                let mut offset = INTERNAL_NODE_KEY_OFFSET;
                 let end_key_data = offset + num_keys * KEY_SIZE;
+
                 for i in 0..num_keys {
                     let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
                     let iter_key = match str::from_utf8(key_raw) {
@@ -329,13 +325,7 @@ impl Node {
     /// get_keys_len 获取当前节点的键数.
     pub fn get_keys_len(&self) -> Result<usize, Error> {
         match self.node_type {
-            NodeType::Internal => {
-                let num_children = self
-                    .page
-                    .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
-                let num_keys = num_children - 1;
-                Ok(num_keys)
-            }
+            NodeType::Internal => self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET),
             NodeType::Leaf => self.page.get_value_from_offset(LEAF_NODE_NUM_PAIRS_OFFSET),
             NodeType::Unknown => Err(Error::UnexpectedError),
         }
@@ -360,21 +350,18 @@ impl Node {
     pub fn update_internal_key(&mut self, old_key: &String, new_key: &String) -> Result<(), Error> {
         match self.node_type {
             NodeType::Internal => {
-                let num_children = self
-                    .page
-                    .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
+                let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
                 let mut result = Vec::<String>::new();
                 let mut offset = INTERNAL_NODE_HEADER_SIZE + num_children * PTR_SIZE;
-                // 键数总是会比儿子数少一
-                let num_keys = num_children - 1;
+                let num_keys = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
                 for _i in 1..=num_keys {
                     let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
                     let key = match str::from_utf8(key_raw) {
                         Ok(key) => key,
                         Err(_) => return Err(Error::UTF8Error),
                     };
-                    if key == old_key {
-                        return self.page.write_bytes_at_offset(new_key.trim_matches(char::from(0)).as_bytes(), offset, KEY_SIZE)
+                    if key.to_owned() == *old_key {
+                        return self.page.write_bytes_at_offset(new_key.trim_matches(char::from(0)).as_bytes(), offset, KEY_SIZE);
                     }
                     offset += KEY_SIZE;
                     // 去掉首尾 \0 字符
@@ -390,13 +377,7 @@ impl Node {
     pub fn update_value(&mut self, kv: KeyValuePair) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf => {
-                let mut offset = VALID_OFFSET;
-                let valid = self.page.get_ptr_from_offset(offset, VALID_SIZE)[0].from_byte();
-                match valid {
-                    true => (),
-                    _ => return Err(Error::UnexpectedError)
-                }
-                offset = LEAF_NODE_NUM_PAIRS_OFFSET;
+                let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
                 let num_keys_val_pairs = self.page.get_value_from_offset(offset)?;
 
                 offset = LEAF_NODE_HEADER_SIZE;
@@ -410,8 +391,7 @@ impl Node {
                     offset += KEY_SIZE;
                     if key == kv.key {
                         let value_raw = kv.value.as_bytes();
-                        self.page
-                            .write_bytes_at_offset(value_raw, offset, VALUE_SIZE)?;
+                        self.page.write_bytes_at_offset(value_raw, offset, VALUE_SIZE)?;
                         return Ok(());
                     }
                     offset += VALUE_SIZE;
@@ -427,7 +407,7 @@ impl Node {
         match self.node_type {
             NodeType::Internal => {
                 let child_num = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
-                let key_num = self.page.get_value_from_offset(INTERNAL_NODE_KEY_OFFSET)?;
+                let key_num = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
                 if key_num < child_num {
                     return Err(Error::UnexpectedError);
                 }
@@ -443,19 +423,18 @@ impl Node {
     /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
     pub fn split(&mut self, pager: &mut Pager) -> Result<(), Error> {
         if self.is_root {
-            let num_children = self
-                .page
-                .get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
+            if self.get_keys_len() <= MAX_BRANCHING_FACTOR {
+                return Ok(())
+            }
+
             let mut offset = INTERNAL_NODE_KEY_OFFSET;
-            let num_key = num_children - 1;
+            let num_key = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
             let children = self.get_children()?;
             let split_node_num_key = num_key / 2;
             let left_page = pager.get_new_page()?;
-            let mut left_node = Node::new(NodeType::Internal,
-                                          self.parent_offset, left_page.page_num, false, left_page, true);
+            let mut left_node = Node::new(NodeType::Internal, self.parent_offset, left_page.page_num, false, left_page)?;
             let right_page = pager.get_new_page()?;
-            let mut right_node = Node::new(NodeType::Internal,
-                                           self.parent_offset, right_page.page_num, false, right_page, true);
+            let mut right_node = Node::new(NodeType::Internal, self.parent_offset, right_page.page_num, false, right_page)?;
 
             for i in 1..split_node_num_key {
                 let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
@@ -464,7 +443,7 @@ impl Node {
                     Ok(key) => key,
                     Err(_) => return Err(Error::UTF8Error),
                 };
-                left_node.add_key_and_left_child(String::from(key), *child_offset)?;
+                left_node.add_key_and_left_child(key.trim_matches(char::from(0)).to_string(), *child_offset)?;
                 offset += KEY_SIZE;
             }
 
@@ -474,7 +453,7 @@ impl Node {
 
             // 清空当前节点孩子，并重新插入
             offset = INTERNAL_NODE_NUM_CHILDREN_OFFSET;
-            self.page.write_bytes_at_offset(&[0], offset, INTERNAL_NODE_NUM_CHILDREN_SIZE)?;
+            self.page.write_value_at_offset(offset, 0)?;
 
             for i in split_node_num_key + 1..num_key {
                 let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
@@ -489,7 +468,7 @@ impl Node {
             let child_offset = children.get(num_key).unwrap();
             right_node.add_child(*child_offset)?;
 
-            self.page.write_bytes_at_offset(&(2 as usize).to_be_bytes(), INTERNAL_NODE_NUM_CHILDREN_OFFSET, INTERNAL_NODE_NUM_CHILDREN_SIZE)?;
+            self.page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, 2)?;
 
             offset = INTERNAL_NODE_CHILDREN_OFFSET;
             self.page.write_bytes_at_offset(&left_node.offset.to_be_bytes(), offset, PTR_SIZE)?;
@@ -499,22 +478,24 @@ impl Node {
 
             let median_key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
             let median_key = match str::from_utf8(median_key_raw) {
-                Ok(key) => String::from(key),
+                Ok(key) => key,
                 Err(_) => return Err(Error::UTF8Error),
             };
-            self.page.write_bytes_at_offset(median_key.as_bytes(), offset, KEY_SIZE)?;
-            return Ok(())
+            self.page.write_bytes_at_offset(median_key.trim_matches(char::from(0)).to_string().as_bytes(), offset, KEY_SIZE)?;
+            return Ok(());
         }
         match self.node_type {
             NodeType::Internal => {
-                let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
+                if self.get_keys_len() < MAX_BRANCHING_FACTOR {
+                    return Ok(())
+                }
+
                 let mut offset = INTERNAL_NODE_KEY_OFFSET;
-                let num_key = num_children - 1;
+                let num_key = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
                 let children = self.get_children()?;
                 let split_node_num_key = num_key / 2;
                 let left_page = pager.get_new_page()?;
-                let mut left_node = Node::new(NodeType::Internal, self.parent_offset, left_page.page_num, false, left_page, true);
-
+                let mut left_node = Node::new(NodeType::Internal, self.parent_offset, left_page.page_num, false, left_page)?;
 
                 for i in 1..split_node_num_key {
                     let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
@@ -529,7 +510,7 @@ impl Node {
 
                 let median_key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
                 let median_key = match str::from_utf8(median_key_raw) {
-                    Ok(key) => String::from(key),
+                    Ok(key) => key.trim_matches(char::from(0)).to_string(),
                     Err(_) => return Err(Error::UTF8Error),
                 };
                 offset += KEY_SIZE;
@@ -538,17 +519,17 @@ impl Node {
 
                 // 清空当前节点孩子，并重新插入
                 offset = INTERNAL_NODE_NUM_CHILDREN_OFFSET;
-                self.page.write_bytes_at_offset(&[0], INTERNAL_NODE_NUM_CHILDREN_OFFSET, INTERNAL_NODE_NUM_CHILDREN_SIZE)?;
-                self.page.write_bytes_at_offset(&[0], INTERNAL_NODE_KEY_OFFSET, KEY_SIZE)?;
+                self.page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, 0)?;
+                self.page.write_value_at_offset(INTERNAL_NODE_NUM_KEY_OFFSET, 0)?;
 
                 for i in split_node_num_key + 1..num_key {
                     let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
                     let child_offset = children.get(i).unwrap();
                     let key = match str::from_utf8(key_raw) {
-                        Ok(key) => String::from(key),
+                        Ok(key) => key.trim_matches(char::from(0)).to_string(),
                         Err(_) => return Err(Error::UTF8Error),
                     };
-                    self.add_key_and_left_child(String::from(key), *child_offset)?;
+                    self.add_key_and_left_child(key, *child_offset)?;
                     offset += KEY_SIZE;
                 }
                 let child_offset = children.get(num_key).unwrap();
@@ -565,13 +546,17 @@ impl Node {
                     Err(_) => return Err(Error::UnexpectedError),
                     Ok(node) => node,
                 };
-                parent_node.add_key_and_left_child(String::from(median_key), left_node.offset)?;
+                parent_node.add_key_and_left_child(median_key, left_node.offset)?;
                 Ok(())
             }
             NodeType::Leaf => {
+                if self.get_key_value_pairs()?.len() < LEAF_NODE_MAX_KEY_VALUE_PAIRS {
+                    return Ok(())
+                }
+
                 let mut kv_pairs = self.get_key_value_pairs()?;
                 let left_leaf_page = pager.get_new_page()?;
-                let mut left_leaf = Node::new(NodeType::Leaf, self.parent_offset, left_leaf_page.page_num, false, left_leaf_page, true);
+                let mut left_leaf = Node::new(NodeType::Leaf, self.parent_offset, left_leaf_page.page_num, false, left_leaf_page)?;
 
                 let mut right_kv_pairs = Vec::<KeyValuePair>::new();
 
@@ -610,12 +595,10 @@ impl Node {
 
     /// 将叶子节点的有效位置零
     /// 非叶子节点抛出异常
+    /// todo
     pub fn delete(&mut self) -> Result<(), Error> {
         return match self.node_type {
-            NodeType::Leaf => {
-                let offset = VALID_OFFSET;
-                self.page.write_bytes_at_offset(&[true.to_byte()], offset, VALID_SIZE)
-            }
+            NodeType::Leaf => Err(Error::UnexpectedError),
             _ => Err(Error::UnexpectedError)
         };
     }
@@ -644,21 +627,19 @@ impl TryFrom<NodeSpec> for Node {
     fn try_from(spec: NodeSpec) -> Result<Self, Self::Error> {
         let page = Page::new_phantom(spec.page_data);
         let is_root = spec.page_data[IS_ROOT_OFFSET].from_byte();
-        let valid = spec.page_data[VALID_OFFSET].from_byte();
         let node_type = NodeType::from(spec.page_data[NODE_TYPE_OFFSET]);
         if node_type == NodeType::Unknown {
             return Err(Error::UnexpectedError);
         }
         let parent_pointer_offset = page.get_value_from_offset(PARENT_POINTER_OFFSET)?;
 
-        return Ok(Node::new(
+        return Node::new(
             node_type,
             parent_pointer_offset,
             spec.offset,
             is_root,
             page,
-            valid,
-        ));
+        );
     }
 }
 
