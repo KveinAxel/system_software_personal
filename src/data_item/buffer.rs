@@ -93,11 +93,14 @@ impl LRUBuffer {
                 hashmap.insert(String::from("metadata.db"), file);
             }
             Err(_) => {
-                let new_metadata = OpenOptions::new()
+                let mut new_metadata = OpenOptions::new()
                     .create(true)
                     .read(true)
                     .write(true)
                     .open(path)?;
+                new_metadata.seek(SeekFrom::Start(0));
+                new_metadata.write_u32::<byteorder::BigEndian>(0);
+                new_metadata.flush();
                 hashmap.insert(String::from("metadata.db"), new_metadata);
             }
         }
@@ -155,8 +158,11 @@ impl Buffer for LRUBuffer {
         match raw_file {
             Some(file) => {
                 file.seek(SeekFrom::Start(0))?;
-                let page_num = file.read_u32::<byteorder::BigEndian>()?;
-                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 || page_num as usize - INIT_FILE_PAGE_NUM < num_of_page{
+                let page_num = match file.read_u32::<byteorder::BigEndian>() {
+                    Ok(pn) => pn,
+                    _ => return Err(Error::UnexpectedError)
+                };
+                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 {
                     return Err(Error::PageNumOutOfSize)
                 }
 
@@ -449,11 +455,14 @@ impl ClockBuffer {
                 hashmap.insert(String::from("metadata.db"), file);
             }
             Err(_) => {
-                let new_metadata = OpenOptions::new()
+                let mut new_metadata = OpenOptions::new()
                     .create(true)
                     .read(true)
                     .write(true)
                     .open(path)?;
+                new_metadata.seek(SeekFrom::Start(0));
+                new_metadata.write_u32::<byteorder::BigEndian>(0);
+                new_metadata.flush();
                 hashmap.insert(String::from("metadata.db"), new_metadata);
             }
         }
@@ -754,5 +763,23 @@ impl Buffer for ClockBuffer {
 
     fn get_buffer_size(&self) -> usize {
         return self.buff_size;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::data_item::buffer::{Buffer, LRUBuffer};
+    use std::path::Path;
+
+    #[test]
+    fn test_add_file() {
+        let mut buffer = match LRUBuffer::new(10) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        buffer.add_file(Path::new("test.db"));
     }
 }
