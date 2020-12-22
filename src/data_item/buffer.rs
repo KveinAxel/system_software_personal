@@ -60,6 +60,8 @@ pub trait Buffer {
     fn insert_bytes(&mut self, file_name: &str, bytes: &[u8]) -> Result<Position, Error>;
 
     fn read_bytes(&mut self, pos: Position, size: usize) -> Result<Vec<u8>, Error>;
+
+    fn get_buffer_size(&self) -> usize;
 }
 
 
@@ -413,6 +415,10 @@ impl Buffer for LRUBuffer {
 
         Ok(page[pos.offset..pos.offset + size].to_vec())
     }
+
+    fn get_buffer_size(&self) -> usize {
+        return self.buff_size;
+    }
 }
 
 /// 采用时钟算法实现的Buffer
@@ -744,5 +750,9 @@ impl Buffer for ClockBuffer {
         file.read_exact(page)?;
 
         Ok(page[pos.offset..pos.offset + size].to_vec())
+    }
+
+    fn get_buffer_size(&self) -> usize {
+        return self.buff_size;
     }
 }

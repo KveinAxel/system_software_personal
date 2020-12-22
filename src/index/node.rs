@@ -195,6 +195,7 @@ impl Node {
     }
 
     /// get_keys 返回一个包装有 Key 列表的 Result
+    /// todo check 能否保证拿出来的键有序？
     pub fn get_keys(&self) -> Result<Vec<String>, Error> {
         return match self.node_type {
             NodeType::Internal => {
@@ -347,11 +348,11 @@ impl Node {
         }
     }
 
+    /// 将一个内部节点的key更换成新的key（!!!不保证更改后的key的大小顺序!!!）
     pub fn update_internal_key(&mut self, old_key: &String, new_key: &String) -> Result<(), Error> {
         match self.node_type {
             NodeType::Internal => {
                 let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
-                let mut result = Vec::<String>::new();
                 let mut offset = INTERNAL_NODE_HEADER_SIZE + num_children * PTR_SIZE;
                 let num_keys = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
                 for _i in 1..=num_keys {
@@ -364,9 +365,24 @@ impl Node {
                         return self.page.write_bytes_at_offset(new_key.trim_matches(char::from(0)).as_bytes(), offset, KEY_SIZE);
                     }
                     offset += KEY_SIZE;
-                    // 去掉首尾 \0 字符
-                    result.push(key.trim_matches(char::from(0)).to_string());
                 }
+                Err(Error::KeyNotFound)
+            }
+            _ => return Err(Error::UnexpectedError)
+        }
+    }
+
+    /// 将内部节点的指定offset更新成新的offset
+    fn update_internal_value(&mut self, old_node_offset: &usize, new_node_offset: &usize) -> Result<(), Error>{
+        match self.node_type {
+            NodeType::Internal => {
+
+                for (i, offset) in self.get_children()?.iter().enumerate() {
+                    if *offset == *old_node_offset {
+                        return self.page.write_value_at_offset(INTERNAL_NODE_CHILDREN_OFFSET + i * PTR_SIZE, *new_node_offset)
+                    }
+                }
+
                 Err(Error::KeyNotFound)
             }
             _ => return Err(Error::UnexpectedError)
@@ -402,7 +418,7 @@ impl Node {
         }
     }
 
-    // 向key和children数量一样的节点加一个child
+    /// 向key和children数量一样的节点加一个child
     fn add_child(&mut self, child_offset: usize) -> Result<(), Error> {
         match self.node_type {
             NodeType::Internal => {
@@ -420,174 +436,182 @@ impl Node {
         }
     }
 
-    /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
-    pub fn split(&mut self, pager: &mut Pager) -> Result<(), Error> {
-        if self.is_root {
-            if self.get_keys_len() <= MAX_BRANCHING_FACTOR {
-                return Ok(())
-            }
+    /// 分裂内部节点
+    /// !!!不做任何检查!!!
+    fn split_internal(&mut self, pager: &mut Pager) -> Result<(Node, String, Node), Error> {
+        let mut offset = INTERNAL_NODE_KEY_OFFSET;
+        let num_key = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
+        let children = self.get_children()?;
+        let split_node_num_key = num_key / 2;
+        let left_page = pager.get_new_page()?;
+        let right_page = pager.get_new_page()?;
+        let mut left_node = Node::new(NodeType::Internal, self.parent_offset, left_page.page_num, false, left_page)?;
+        let mut right_node = Node::new(NodeType::Internal, self.parent_offset, right_page.page_num, false, right_page)?;
 
-            let mut offset = INTERNAL_NODE_KEY_OFFSET;
-            let num_key = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
-            let children = self.get_children()?;
-            let split_node_num_key = num_key / 2;
-            let left_page = pager.get_new_page()?;
-            let mut left_node = Node::new(NodeType::Internal, self.parent_offset, left_page.page_num, false, left_page)?;
-            let right_page = pager.get_new_page()?;
-            let mut right_node = Node::new(NodeType::Internal, self.parent_offset, right_page.page_num, false, right_page)?;
-
-            for i in 1..split_node_num_key {
-                let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
-                let child_offset = children.get(i - 1).unwrap();
-                let key = match str::from_utf8(key_raw) {
-                    Ok(key) => key,
-                    Err(_) => return Err(Error::UTF8Error),
-                };
-                left_node.add_key_and_left_child(key.trim_matches(char::from(0)).to_string(), *child_offset)?;
-                offset += KEY_SIZE;
-            }
-
-            offset += KEY_SIZE;
-            let median_offset = children.get(split_node_num_key).unwrap();
-            left_node.add_child(*median_offset)?;
-
-            // 清空当前节点孩子，并重新插入
-            offset = INTERNAL_NODE_NUM_CHILDREN_OFFSET;
-            self.page.write_value_at_offset(offset, 0)?;
-
-            for i in split_node_num_key + 1..num_key {
-                let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
-                let child_offset = children.get(i).unwrap();
-                let key = match str::from_utf8(key_raw) {
-                    Ok(key) => key,
-                    Err(_) => return Err(Error::UTF8Error),
-                };
-                right_node.add_key_and_left_child(String::from(key), *child_offset)?;
-                offset += KEY_SIZE;
-            }
-            let child_offset = children.get(num_key).unwrap();
-            right_node.add_child(*child_offset)?;
-
-            self.page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, 2)?;
-
-            offset = INTERNAL_NODE_CHILDREN_OFFSET;
-            self.page.write_bytes_at_offset(&left_node.offset.to_be_bytes(), offset, PTR_SIZE)?;
-            self.page.write_bytes_at_offset(&right_node.offset.to_be_bytes(), offset, PTR_SIZE)?;
-
-            offset = INTERNAL_NODE_KEY_OFFSET;
-
-            let median_key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
-            let median_key = match str::from_utf8(median_key_raw) {
+        // 前一半的键给新左儿子
+        for i in 1..split_node_num_key {
+            let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
+            let child_offset = children.get(i - 1).unwrap();
+            let key = match str::from_utf8(key_raw) {
                 Ok(key) => key,
                 Err(_) => return Err(Error::UTF8Error),
             };
-            self.page.write_bytes_at_offset(median_key.trim_matches(char::from(0)).to_string().as_bytes(), offset, KEY_SIZE)?;
-            return Ok(());
+            left_node.add_key_and_left_child(key.trim_matches(char::from(0)).to_string(), *child_offset)?;
+            offset += KEY_SIZE;
         }
+
+        // 跳过中间键（中间键需要上弹）
+        offset += KEY_SIZE;
+
+        // 中间键的左儿子给新左儿子
+        let median_offset = children.get(split_node_num_key).unwrap();
+        left_node.add_child(*median_offset)?;
+
+        // 后一半的键给新右儿子
+        for i in split_node_num_key + 1..num_key {
+            let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
+            let child_offset = children.get(i).unwrap();
+            let key = match str::from_utf8(key_raw) {
+                Ok(key) => key,
+                Err(_) => return Err(Error::UTF8Error),
+            };
+            right_node.add_key_and_left_child(String::from(key), *child_offset)?;
+            offset += KEY_SIZE;
+        }
+
+        // 最后一个儿子给右儿子
+        let child_offset = children.get(num_key).unwrap();
+        right_node.add_child(*child_offset)?;
+
+        // 将中间键作为上弹的键
+        offset = INTERNAL_NODE_KEY_OFFSET;
+        let median_key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
+        let median_key = match str::from_utf8(median_key_raw) {
+            Ok(key) => key,
+            Err(_) => return Err(Error::UTF8Error),
+        };
+
+        Ok((left_node, median_key.trim_matches(char::from(0)).to_string(), right_node))
+    }
+
+    /// 分裂叶子节点
+    /// !!!不做任何检查!!!
+    fn split_leaf(&mut self, pager: &mut Pager) -> Result<(Node, String, Node), Error> {
+        // 初始化新的左右叶子节点
+        let mut kv_pairs = self.get_key_value_pairs()?;
+        let left_leaf_page = pager.get_new_page()?;
+        let right_leaf_page = pager.get_new_page()?;
+        let mut left_leaf = Node::new(NodeType::Leaf, self.parent_offset, left_leaf_page.page_num, false, left_leaf_page)?;
+        let mut right_leaf = Node::new(NodeType::Leaf, self.parent_offset, right_leaf_page.page_num, false, right_leaf_page)?;
+
+        kv_pairs.sort();
+        let mid = kv_pairs.len() / 2;
+        for (i, kv) in kv_pairs.iter_mut().enumerate() {
+            if i < mid {
+                left_leaf.add_key_value_pair(kv.clone())?
+            } else {
+                right_leaf.add_key_value_pair(kv.clone())?
+            }
+        }
+
+        Ok((left_leaf, kv_pairs.get(mid).unwrap().key.clone(), right_leaf))
+    }
+
+
+    /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
+    pub(crate) fn split(&mut self, pager: &mut Pager) -> Result<bool, Error> {
+        if self.is_root {
+
+            // 根节点不满足分裂要求
+            if self.get_keys_len()? <= MAX_BRANCHING_FACTOR {
+                return Ok(false);
+            }
+
+            let (left_node, median_key, right_node) = self.split_internal(pager)?;
+
+            // 新的根节点只有两个儿子，分别是新左儿子、新右儿子
+            self.page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, 2)?;
+
+            // 将新左儿子、新右儿子写入到根节点的儿子偏移处
+            let mut offset = INTERNAL_NODE_CHILDREN_OFFSET;
+            self.page.write_bytes_at_offset(&left_node.offset.to_be_bytes(), offset, PTR_SIZE)?;
+            self.page.write_bytes_at_offset(&right_node.offset.to_be_bytes(), offset, PTR_SIZE)?;
+
+            // 将新的键写入根节点
+            self.page.write_bytes_at_offset(median_key.as_bytes(), offset, KEY_SIZE)?;
+
+            // 有分裂，返回true
+            return Ok(true);
+        }
+
+        // 不是根节点的情况
         match self.node_type {
             NodeType::Internal => {
-                if self.get_keys_len() < MAX_BRANCHING_FACTOR {
-                    return Ok(())
+
+                // 是中间节点且不满足分裂条件
+                if self.get_keys_len()? < MAX_BRANCHING_FACTOR {
+                    return Ok(false);
                 }
 
-                let mut offset = INTERNAL_NODE_KEY_OFFSET;
-                let num_key = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
-                let children = self.get_children()?;
-                let split_node_num_key = num_key / 2;
-                let left_page = pager.get_new_page()?;
-                let mut left_node = Node::new(NodeType::Internal, self.parent_offset, left_page.page_num, false, left_page)?;
+                // 分裂当前节点
+                let (left_node, median_key, right_node) = self.split_internal(pager)?;
 
-                for i in 1..split_node_num_key {
-                    let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
-                    let child_offset = children.get(i - 1).unwrap();
-                    let key = match str::from_utf8(key_raw) {
-                        Ok(key) => key,
-                        Err(_) => return Err(Error::UTF8Error),
-                    };
-                    left_node.add_key_and_left_child(String::from(key), *child_offset)?;
-                    offset += KEY_SIZE;
-                }
-
-                let median_key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
-                let median_key = match str::from_utf8(median_key_raw) {
-                    Ok(key) => key.trim_matches(char::from(0)).to_string(),
-                    Err(_) => return Err(Error::UTF8Error),
-                };
-                offset += KEY_SIZE;
-                let median_offset = children.get(split_node_num_key).unwrap();
-                left_node.add_child(*median_offset)?;
-
-                // 清空当前节点孩子，并重新插入
-                offset = INTERNAL_NODE_NUM_CHILDREN_OFFSET;
-                self.page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, 0)?;
-                self.page.write_value_at_offset(INTERNAL_NODE_NUM_KEY_OFFSET, 0)?;
-
-                for i in split_node_num_key + 1..num_key {
-                    let key_raw = self.page.get_ptr_from_offset(offset, KEY_SIZE);
-                    let child_offset = children.get(i).unwrap();
-                    let key = match str::from_utf8(key_raw) {
-                        Ok(key) => key.trim_matches(char::from(0)).to_string(),
-                        Err(_) => return Err(Error::UTF8Error),
-                    };
-                    self.add_key_and_left_child(key, *child_offset)?;
-                    offset += KEY_SIZE;
-                }
-                let child_offset = children.get(num_key).unwrap();
-                self.add_child(*child_offset)?;
-
+                // 获取父节点
                 let parent_offset = self.parent_offset;
                 let page_num = parent_offset / PAGE_SIZE;
-                let lock = Arc::new(RwLock::new(
-                    Node::try_from(NodeSpec {
-                        page_data: pager.get_page(self.page.file_name.as_str(), &page_num).unwrap().get_data(),
-                        offset: parent_offset,
-                    })?));
+                let lock =
+                    Arc::new(
+                        RwLock::new(
+                            Node::try_from(
+                                NodeSpec {
+                                    page_data: pager.get_page(&page_num).unwrap().get_data(),
+                                    offset: parent_offset,
+                                }
+                            )?
+                        )
+                    );
                 let mut parent_node = match lock.write() {
                     Err(_) => return Err(Error::UnexpectedError),
                     Ok(node) => node,
                 };
+                // 将新左儿子加到父亲
                 parent_node.add_key_and_left_child(median_key, left_node.offset)?;
-                Ok(())
+                parent_node.update_internal_value(&self.offset, &right_node.offset)?;
+                // todo 释放当前节点
+                Ok(true)
             }
             NodeType::Leaf => {
+
+                // 是叶子节点，且不满足分裂条件
                 if self.get_key_value_pairs()?.len() < LEAF_NODE_MAX_KEY_VALUE_PAIRS {
-                    return Ok(())
+                    return Ok(false);
                 }
 
-                let mut kv_pairs = self.get_key_value_pairs()?;
-                let left_leaf_page = pager.get_new_page()?;
-                let mut left_leaf = Node::new(NodeType::Leaf, self.parent_offset, left_leaf_page.page_num, false, left_leaf_page)?;
+                // 分裂当前节点
+                let (left_leaf, median_key, right_leaf) = self.split_leaf(pager)?;
 
-                let mut right_kv_pairs = Vec::<KeyValuePair>::new();
-
-                kv_pairs.sort();
-                let mid = kv_pairs.len() / 2;
-                for (i, kv) in kv_pairs.iter_mut().enumerate() {
-                    if i < mid {
-                        left_leaf.add_key_value_pair(kv.clone())?
-                    } else {
-                        right_kv_pairs.push(kv.clone());
-                    }
-                }
-
+                // 获取父节点
                 let parent_offset = self.parent_offset;
                 let page_num = parent_offset / PAGE_SIZE;
-                let lock_parent_node = Arc::new(RwLock::new(
-                    Node::try_from(NodeSpec {
-                        page_data: pager.get_page(self.page.file_name.as_str(), &page_num).unwrap().get_data(),
-                        offset: parent_offset,
-                    })?));
+                let lock_parent_node =
+                    Arc::new(
+                        RwLock::new(
+                            Node::try_from(
+                                NodeSpec {
+                                    page_data: pager.get_page(&page_num).unwrap().get_data(),
+                                    offset: parent_offset,
+                                }
+                            )?
+                        )
+                    );
                 let mut parent_node = match lock_parent_node.write() {
                     Err(_) => return Err(Error::UnexpectedError),
                     Ok(node) => node,
                 };
-                parent_node.add_key_and_left_child(kv_pairs.get(mid).unwrap().key.clone(), left_leaf.offset)?;
-
-                self.page.write_bytes_at_offset(&right_kv_pairs.len().to_be_bytes(), LEAF_NODE_NUM_PAIRS_OFFSET, LEAF_NODE_NUM_PAIRS_SIZE)?;
-                for i in right_kv_pairs {
-                    self.add_key_value_pair(i.clone())?;
-                }
-                Ok(())
+                parent_node.add_key_and_left_child(median_key, left_leaf.offset)?;
+                parent_node.update_internal_value(&self.offset, &right_leaf.offset)?;
+                // todo 释放当前节点
+                Ok(true)
             }
             NodeType::Unknown => Err(Error::UnexpectedError),
         }
@@ -595,7 +619,7 @@ impl Node {
 
     /// 将叶子节点的有效位置零
     /// 非叶子节点抛出异常
-    /// todo
+    /// todo 节点删除
     pub fn delete(&mut self) -> Result<(), Error> {
         return match self.node_type {
             NodeType::Leaf => Err(Error::UnexpectedError),
@@ -616,7 +640,8 @@ impl TryFrom<Node> for [u8; PAGE_SIZE] {
     }
 }
 
-/// NodeSpec 是一个包装。通过 TryFrom 将一个页的字节数组转换成 Node struct 来实现.
+/// NodeSpec 是一个包装。
+/// 通过 TryFrom 将一个页的字节数组转换成 Node struct 来实现.
 pub struct NodeSpec {
     pub page_data: [u8; PAGE_SIZE],
     pub offset: usize,

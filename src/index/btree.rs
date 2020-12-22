@@ -21,12 +21,26 @@ pub struct BTree {
 }
 
 impl BTree {
-    fn new(pager: Pager, root: Node, file_name: String) -> BTree {
-        BTree {
+    fn new(mut pager: Pager, file_name: String) -> Result<BTree, Error> {
+        let mut page = pager.get_new_page()?;
+        let mut root =
+            Arc::new(
+                RwLock::new(
+                    Node::new(
+                        NodeType::Internal,
+                        0,
+                        page.page_num,
+                        true,
+                        page,
+                    )?
+                )
+            );
+
+        Ok(BTree {
             file_name,
             pager,
-            root: Arc::new(RwLock::new(root)),
-        }
+            root,
+        })
     }
 
     /// 在树上查询一个键
@@ -53,7 +67,7 @@ impl BTree {
         };
         let keys_len = guarded_node.get_keys_len()?;
         if keys_len < NODE_KEYS_LIMIT {
-            // 在内存中的struct中添加键值对.
+            // 向叶子节点插入键值对.
             guarded_node.add_key_value_pair(kv)?;
             // 将对应页写入磁盘.
             return self
@@ -66,7 +80,7 @@ impl BTree {
 
     /// 将key所对应的值更新为value
     pub fn update(&mut self, kv: KeyValuePair) -> Result<(), Error> {
-        let (node, kv_pair_exists) = self.search_node( Arc::clone(&self.root), &kv.key, false)?;
+        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, false)?;
         match kv_pair_exists {
             None => return Err(Error::KeyNotFound),
             Some(_) => ()
@@ -97,18 +111,26 @@ impl BTree {
     /// 如果遍历了所有的叶子节点，还没有找到对应的键
     /// 返回叶子节点和空来表示没找到
     /// 否则，继续递归或者返回合适的错误
+    /// inserted字段控制在找不到合适节点时是否插入新节点并返回
     fn search_node(
         &mut self,
         node: Arc<RwLock<Node>>,
         search_key: &String,
         inserted: bool,
     ) -> Result<(Arc<RwLock<Node>>, Option<KeyValuePair>), Error> {
+
+        // 获取待查询子树的读权限
         let guarded_node = match node.read() {
             Err(_) => return Err(Error::UnexpectedError),
             Ok(node) => node,
         };
 
+        // 分派节点类型
         match guarded_node.node_type {
+
+            // 对于叶子节点
+            // 获取叶子的所有的键
+            // 然后匹配这些键
             NodeType::Leaf => {
                 let keys = guarded_node.get_keys()?;
                 for (i, key) in keys.iter().enumerate() {
@@ -122,26 +144,20 @@ impl BTree {
                 }
                 Ok((Arc::clone(&node), None))
             }
+
+            // 对于中间节点
+            // 获取节点所有的键
+            // 找到第一个比待查询键大的键
+            // 若找到，获取键左边的儿子，并递归查询
+            // 若找不到，且需要插入，则扩大最后一个键，并递归插入
             NodeType::Internal => {
                 let keys = guarded_node.get_keys()?;
-                let mut prev_key: Option<&String> = None;
                 let mut index: Option<usize> = None;
                 for (i, key) in keys.iter().enumerate() {
-                    match prev_key {
-                        Some(p_key) => {
-                            if *p_key < *search_key && *search_key <= *key {
-                                index = Some(i);
-                                break;
-                            }
-                        }
-                        None => {
-                            if *search_key <= *key {
-                                index = Some(i);
-                                break;
-                            }
-                        }
+                    if *search_key <= *key {
+                        index = Some(i);
+                        break;
                     }
-                    prev_key = Some(key);
                 };
 
                 match index {
@@ -154,41 +170,49 @@ impl BTree {
                         let page_num = child_offset / PAGE_SIZE;
                         let child_node = Node::try_from(NodeSpec {
                             offset: *child_offset,
-                            page_data: self.pager.borrow_mut().get_page(self.file_name.as_str(), &page_num)?.get_data(),
+                            page_data: self.pager.borrow_mut().get_page(&page_num)?.get_data(),
                         })?;
                         return self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted);
                     }
                     None => {
                         if inserted {
-                            return match prev_key {
+                            // 获取最后一个键用于插入
+                            let last_key = keys.last();
+
+                            return match last_key {
                                 Some(last_key) => {
+                                    //获取写权限
                                     let mut write_node = match node.write() {
                                         Err(_) => return Err(Error::UnexpectedError),
                                         Ok(node) => node
                                     };
+
+                                    // 更新最后一个键
                                     write_node.update_internal_key(last_key, search_key)?;
+
+                                    // 获取最后一个儿子
                                     let children_ptrs = write_node.get_children()?;
-                                    let child_offset = match children_ptrs.get(children_ptrs.len() - 1) {
+                                    let child_offset = match children_ptrs.last() {
                                         None => return Err(Error::UnexpectedError),
                                         Some(child_offset) => child_offset,
                                     };
-
                                     let pager = self.pager.borrow_mut();
                                     let page_num = child_offset / PAGE_SIZE;
                                     let child_node = Node::try_from(NodeSpec {
                                         offset: *child_offset,
-                                        page_data: pager.get_page(self.file_name.as_str(), &page_num)?.get_data(),
+                                        page_data: pager.get_page(&page_num)?.get_data(),
                                     })?;
+
+                                    // 查询最后一个儿子， 实际上这里会导致递归插入
                                     self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted)
                                 }
                                 None => Err(Error::UnexpectedError)
-                            }
+                            };
                         } else {
                             Err(Error::UnexpectedError)
                         }
                     }
                 }
-
             }
             NodeType::Unknown => {
                 Err(Error::UnexpectedError)
@@ -200,23 +224,35 @@ impl BTree {
     /// 若超过，则分裂
     fn split_node(&mut self, node: Arc<RwLock<Node>>) -> Result<(), Error> {
 
+        // 获取写权限
         let mut guarded_node = match node.write() {
             Err(_) => return Err(Error::UnexpectedError),
             Ok(node) => node,
         };
 
         return if guarded_node.is_root {
-            // 处理root节点
+            // 如果是根节点，直接分裂
             guarded_node.split(&mut self.pager)?;
             Ok(())
         } else {
-            guarded_node.split(&mut self.pager)?;
-            let page_num = guarded_node.parent_offset / PAGE_SIZE;
-            let parent_node = Arc::new(RwLock::new(Node::try_from(NodeSpec {
-                page_data: self.pager.get_page(self.file_name.as_str(), &page_num).unwrap().get_data(),
-                offset: guarded_node.parent_offset,
-            })?));
-            self.split_node(parent_node)
-        }
+            // 如果当前节点分裂，则父节点也可能需要分裂
+            if guarded_node.split(&mut self.pager)? {
+                let page_num = guarded_node.parent_offset / PAGE_SIZE;
+                let parent_node =
+                    Arc::new(
+                        RwLock::new(
+                            Node::try_from(
+                                NodeSpec {
+                                    page_data: self.pager.get_page(&page_num).unwrap().get_data(),
+                                    offset: guarded_node.parent_offset,
+                                }
+                            )?
+                        )
+                    );
+                // 递归分裂父节点
+                self.split_node(parent_node)?;
+            }
+            Ok(())
+        };
     }
 }
