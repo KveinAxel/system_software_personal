@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
+use crate::util::data_gen::get_empty_data;
 use byteorder::{WriteBytesExt, ReadBytesExt};
 
 /// 缓冲区自己管理的配置页的索引
@@ -42,6 +43,7 @@ pub struct Position {
 }
 
 /// 缓冲区的trait，实现了通过缓冲区获取页、写入页、强制刷新页
+/// todo 检查page_num 拒绝所有0, page_num从1开始计数，0为幽灵页
 pub trait Buffer {
     fn add_file(&mut self, path: &Path) -> Result<(), Error>;
 
@@ -62,6 +64,10 @@ pub trait Buffer {
     fn read_bytes(&mut self, pos: Position, size: usize) -> Result<Vec<u8>, Error>;
 
     fn get_buffer_size(&self) -> usize;
+
+    fn flush_file(&mut self, file_name: &str) -> Result<(), Error>;
+
+    fn flush_all(&mut self) -> Result<(), Error>;
 }
 
 
@@ -71,6 +77,7 @@ pub struct LRUBuffer {
     len: usize,
     buff_size: usize,
     file: HashMap<String, File>,
+    meta_file_name: String
 }
 
 /// LRUBuffer中的每一项
@@ -81,8 +88,8 @@ struct LRUBufferItem {
 
 impl LRUBuffer {
     /// LRUBuffer的构造方法
-    pub fn new(buff_size: usize) -> Result<LRUBuffer, Error> {
-        let path = Path::new("metadata.db");
+    pub fn new(buff_size: usize, meta_file_name: String) -> Result<LRUBuffer, Error> {
+        let path = Path::new(meta_file_name.as_str());
         let mut hashmap = HashMap::<String, File>::new();
         let fd = OpenOptions::new()
             .read(true)
@@ -90,7 +97,7 @@ impl LRUBuffer {
             .open(path);
         match fd {
             Ok(file) => {
-                hashmap.insert(String::from("metadata.db"), file);
+                hashmap.insert(meta_file_name.clone(), file);
             }
             Err(_) => {
                 let mut new_metadata = OpenOptions::new()
@@ -101,7 +108,7 @@ impl LRUBuffer {
                 new_metadata.seek(SeekFrom::Start(0));
                 new_metadata.write_u32::<byteorder::BigEndian>(0);
                 new_metadata.flush();
-                hashmap.insert(String::from("metadata.db"), new_metadata);
+                hashmap.insert(meta_file_name.clone(), new_metadata);
             }
         }
         let mut res = LRUBuffer {
@@ -109,10 +116,42 @@ impl LRUBuffer {
             len: 0,
             buff_size,
             file: hashmap,
+            meta_file_name: meta_file_name.clone()
         };
-        res.fill_up_to("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        res.fill_up_to(meta_file_name.as_str(), METADATA_FILE_PAGE_NUM)?;
         Ok(res)
     }
+
+    fn flush_internal(&mut self, raw_file_name: Option<&str>, raw_page_num: Option<&usize>, updated: bool) -> Result<(), Error> {
+        let mut file_name = "";
+        let mut page_num = 0usize;
+        let has_file_name = match raw_file_name {
+            Some(f_name) => {
+                file_name = f_name;
+                true
+            }
+            None => false
+        };
+        let has_page_num = match raw_page_num {
+            Some(p_num) => {
+                page_num = *p_num;
+                true
+            }
+            None => false
+        };
+        for i in self.list.iter_mut() {
+            if (!has_file_name || i.page.file_name == file_name) && (!has_page_num || i.page.page_num == page_num) {
+                if updated {
+                    i.time = SystemTime::now();
+                }
+                let file = self.file.get_mut(i.page.file_name.as_str()).unwrap();
+                file.seek(SeekFrom::Start(((i.page.page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
+                file.write_all(&i.page.get_data())?;
+            }
+        }
+        Ok(())
+    }
+
 }
 
 impl Buffer for LRUBuffer {
@@ -126,7 +165,7 @@ impl Buffer for LRUBuffer {
 
         // 初始化文件大小
         fd.seek(SeekFrom::Start(0))?;
-        fd.write_all(Vec::<u8>::with_capacity(INIT_FILE_PAGE_NUM * PAGE_SIZE).as_slice())?;
+        fd.write_all(get_empty_data(INIT_FILE_PAGE_NUM * PAGE_SIZE).as_slice())?;
 
         // 填充文件头配置信息
         // 文件页数
@@ -163,12 +202,13 @@ impl Buffer for LRUBuffer {
                     _ => return Err(Error::UnexpectedError)
                 };
                 if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 {
-                    return Err(Error::PageNumOutOfSize)
+                    return Err(Error::PageNumOutOfSize);
                 }
 
                 // 填充文件
                 file.seek(SeekFrom::Start((page_num as usize * PAGE_SIZE) as u64))?;
-                file.write_all(Vec::<u8>::with_capacity((num_of_page - page_num as usize + INIT_FILE_PAGE_NUM) * PAGE_SIZE).as_slice())?;
+                let siz = (num_of_page - page_num as usize + INIT_FILE_PAGE_NUM) * PAGE_SIZE;
+                file.write_all(get_empty_data(siz).as_slice())?;
 
                 // 更新文件头
                 file.seek(SeekFrom::Start(0))?;
@@ -236,7 +276,7 @@ impl Buffer for LRUBuffer {
             // 刷新最旧页
             match (min_time_page_num, min_time_file_name) {
                 (Some(p_num), Some(f_name)) => {
-                    self.flush(f_name.as_str(), &p_num)?
+                    self.flush_internal(Some(f_name.as_str()), Some(&p_num), false)?
                 }
                 (_, _) => return Err(Error::UnexpectedError)
             }
@@ -326,22 +366,13 @@ impl Buffer for LRUBuffer {
     /// 强制刷新一个缓冲区的页面至磁盘
     /// 若页面不在缓冲区，则返回不在缓冲区异常
     fn flush(&mut self, file_name: &str, page_num: &usize) -> Result<(), Error> {
-        for i in self.list.iter_mut() {
-            if i.page.file_name == file_name && i.page.page_num == *page_num {
-                i.time = SystemTime::now();
-                let file = self.file.get_mut(file_name).unwrap();
-                file.seek(SeekFrom::Start(((page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
-                file.write_all(&i.page.get_data())?;
-                return Ok(());
-            }
-        }
-        Err(Error::NotInBufferError)
+        self.flush_internal(Some(file_name), Some(page_num), true)
     }
 
     // 获取第一个uuid
     fn get_first_uuid(&mut self) -> Result<Uuid, Error> {
         // 获取uuid所在的页
-        let page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        let page = self.get_page(self.meta_file_name.clone().as_str(), METADATA_FILE_PAGE_NUM)?;
         // 获取对应字节数组
         let bytes = page.get_ptr_from_offset(FIRST_UUID_OFFSET, 16);
         let uuid = Uuid::from_slice(bytes);
@@ -354,7 +385,7 @@ impl Buffer for LRUBuffer {
     // 更新第一个uuid
     fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
         // 获取uuid所在页
-        let mut page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        let mut page = self.get_page(self.meta_file_name.clone().as_str(), METADATA_FILE_PAGE_NUM)?;
         // 写入对应的字节数组
         page.write_bytes_at_offset(uuid.as_bytes(), FIRST_UUID_OFFSET, 16)?;
         // 将页写回的缓冲池
@@ -389,7 +420,7 @@ impl Buffer for LRUBuffer {
                     file_name: String::from(file_name),
                     page_num: i as usize,
                     offset: PAGE_SIZE - res as usize,
-                })
+                });
             }
         }
         // 如果文件不够大
@@ -425,6 +456,14 @@ impl Buffer for LRUBuffer {
     fn get_buffer_size(&self) -> usize {
         return self.buff_size;
     }
+
+    fn flush_file(&mut self, file_name: &str) -> Result<(), Error> {
+        self.flush_internal(Some(file_name), None, true)
+    }
+
+    fn flush_all(&mut self) -> Result<(), Error> {
+        self.flush_internal(None, None, true)
+    }
 }
 
 /// 采用时钟算法实现的Buffer
@@ -434,6 +473,7 @@ pub struct ClockBuffer {
     file: HashMap<String, File>,
     cur: usize,
     buff_size: usize,
+    meta_file_name: String
 }
 
 /// ClockBuffer中的每一项
@@ -443,8 +483,8 @@ struct ClockBufferItem {
 }
 
 impl ClockBuffer {
-    fn new(buff_size: usize) -> Result<ClockBuffer, Error> {
-        let path = Path::new("metadata.db");
+    fn new(buff_size: usize, meta_file_name: String) -> Result<ClockBuffer, Error> {
+        let path = Path::new(meta_file_name.as_str());
         let mut hashmap = HashMap::<String, File>::new();
         let fd = OpenOptions::new()
             .read(true)
@@ -452,7 +492,7 @@ impl ClockBuffer {
             .open(path);
         match fd {
             Ok(file) => {
-                hashmap.insert(String::from("metadata.db"), file);
+                hashmap.insert(meta_file_name.clone(), file);
             }
             Err(_) => {
                 let mut new_metadata = OpenOptions::new()
@@ -463,7 +503,7 @@ impl ClockBuffer {
                 new_metadata.seek(SeekFrom::Start(0));
                 new_metadata.write_u32::<byteorder::BigEndian>(0);
                 new_metadata.flush();
-                hashmap.insert(String::from("metadata.db"), new_metadata);
+                hashmap.insert(meta_file_name.clone(), new_metadata);
             }
         }
         let mut res = ClockBuffer {
@@ -472,8 +512,9 @@ impl ClockBuffer {
             buff_size,
             file: hashmap,
             cur: 0,
+            meta_file_name: meta_file_name.clone()
         };
-        res.fill_up_to("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        res.fill_up_to(meta_file_name.as_str(), METADATA_FILE_PAGE_NUM)?;
         Ok(res)
     }
 }
@@ -489,7 +530,7 @@ impl Buffer for ClockBuffer {
 
         // 初始化文件大小
         fd.seek(SeekFrom::Start(0))?;
-        fd.write_all(Vec::<u8>::with_capacity(INIT_FILE_PAGE_NUM * PAGE_SIZE).as_slice())?;
+        fd.write_all(get_empty_data(INIT_FILE_PAGE_NUM * PAGE_SIZE).as_slice())?;
 
         // 填充文件头配置信息
         // 文件页数
@@ -522,13 +563,13 @@ impl Buffer for ClockBuffer {
             Some(file) => {
                 file.seek(SeekFrom::Start(0))?;
                 let page_num = file.read_u32::<byteorder::BigEndian>()?;
-                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 || page_num as usize - INIT_FILE_PAGE_NUM < num_of_page{
-                    return Err(Error::PageNumOutOfSize)
+                if PAGE_SIZE < (INIT_FILE_PAGE_NUM + num_of_page + 1) * 32 {
+                    return Err(Error::PageNumOutOfSize);
                 }
 
                 // 填充文件
                 file.seek(SeekFrom::Start((page_num as usize * PAGE_SIZE) as u64))?;
-                file.write_all(Vec::<u8>::with_capacity((num_of_page - page_num as usize + INIT_FILE_PAGE_NUM) * PAGE_SIZE).as_slice())?;
+                file.write_all(get_empty_data((num_of_page - page_num as usize + INIT_FILE_PAGE_NUM) * PAGE_SIZE).as_slice())?;
 
                 // 更新文件头
                 file.seek(SeekFrom::Start(0))?;
@@ -634,7 +675,6 @@ impl Buffer for ClockBuffer {
             });
             Ok(())
         } else {
-
             let mut new_cur: Option<usize> = None;
 
             // 循环遍历缓冲区
@@ -685,7 +725,7 @@ impl Buffer for ClockBuffer {
     }
 
     fn get_first_uuid(&mut self) -> Result<Uuid, Error> {
-        let page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        let page = self.get_page(self.meta_file_name.clone().as_str(), METADATA_FILE_PAGE_NUM)?;
         let bytes = page.get_ptr_from_offset(FIRST_UUID_OFFSET, 16);
         let uuid = Uuid::from_slice(bytes);
         match uuid {
@@ -695,7 +735,7 @@ impl Buffer for ClockBuffer {
     }
 
     fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
-        let mut page = self.get_page("metadata.db", METADATA_FILE_PAGE_NUM)?;
+        let mut page = self.get_page(self.meta_file_name.clone().as_str(), METADATA_FILE_PAGE_NUM)?;
         page.write_bytes_at_offset(uuid.as_bytes(), FIRST_UUID_OFFSET, 16)?;
         self.write_page(page)?;
         Ok(())
@@ -728,7 +768,7 @@ impl Buffer for ClockBuffer {
                     file_name: String::from(file_name),
                     page_num: i as usize,
                     offset: PAGE_SIZE - res as usize,
-                })
+                });
             }
         }
         // 如果文件不够大
@@ -764,22 +804,307 @@ impl Buffer for ClockBuffer {
     fn get_buffer_size(&self) -> usize {
         return self.buff_size;
     }
+
+
+    fn flush_file(&mut self, file_name: &str) -> Result<(), Error> {
+        for i in self.list.iter() {
+            if i.page.file_name == file_name {
+                let file = self.file.get_mut(file_name).unwrap();
+                file.seek(SeekFrom::Start(((i.page.page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
+                file.write_all(&i.page.get_data())?;
+            }
+        }
+        return Ok(());
+    }
+
+    fn flush_all(&mut self) -> Result<(), Error> {
+        for i in self.list.iter() {
+            let file = self.file.get_mut(i.page.file_name.as_str()).unwrap();
+            file.seek(SeekFrom::Start(((i.page.page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
+            file.write_all(&i.page.get_data())?;
+        }
+        return Ok(());
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::data_item::buffer::{Buffer, LRUBuffer};
+    use crate::data_item::buffer::{Buffer, LRUBuffer, ClockBuffer};
     use std::path::Path;
+    use std::fs;
+    use crate::page::page_item::{PAGE_SIZE, Page};
 
     #[test]
     fn test_add_file() {
-        let mut buffer = match LRUBuffer::new(10) {
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+
+        let mut buffer = match LRUBuffer::new(10, "metadata.db".to_string()) {
             Ok(buffer) => buffer,
             Err(_) => {
                 assert!(false);
                 return;
             }
         };
-        buffer.add_file(Path::new("test.db"));
+        match buffer.add_file(Path::new("test.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+
+        let mut buffer2 = match ClockBuffer::new(10, "metadata.db".to_string()) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        match buffer2.add_file(Path::new("test.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+    }
+
+    #[test]
+    fn test_fill_up_to() {
+        fs::remove_file("metadata.db");
+        fs::remove_file("metadata2.db");
+        fs::remove_file("test2.db");
+
+        let mut buffer = match LRUBuffer::new(10, "metadata2.db".to_string()) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        match buffer.add_file(Path::new("test2.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+        buffer.fill_up_to("test2.db", 10);
+        buffer.flush_file("test2.db");
+
+        let meta = match fs::metadata(Path::new("test2.db")) {
+            Ok(meta) => meta,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        assert_eq!(14 * PAGE_SIZE as u64, meta.len());
+
+        fs::remove_file("metadata2.db");
+        fs::remove_file("test2.db");
+
+        let mut buffer = match ClockBuffer::new(10, "metadata2.db".to_string()) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        match buffer.add_file(Path::new("test2.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+        buffer.fill_up_to("test2.db", 10);
+        buffer.flush_file("test2.db");
+
+        let meta = match fs::metadata(Path::new("test2.db")) {
+            Ok(meta) => meta,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        assert_eq!(14 * PAGE_SIZE as u64, meta.len());
+
+        fs::remove_file("metadata2.db");
+        fs::remove_file("test2.db");
+    }
+
+    #[test]
+    fn test_page_get_write() {
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+
+        // test lru
+        let mut slice: [u8; 4096] = [0; 4096];
+        for i in 0..4096 {
+            slice[i] = (i % 8) as u8;
+        }
+        let mut page = Page::new_phantom(slice);
+        page.page_num = 1;
+        page.file_name = String::from("test.db");
+        let mut buffer = match LRUBuffer::new(10, "metadata.db".to_string()) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        match buffer.add_file(Path::new("test.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+        buffer.fill_up_to("test.db", 10);
+        buffer.write_page(page);
+        buffer.flush_file("test.db");
+
+        let page2 = match buffer.get_page("test.db", 1) {
+            Ok(page) => page.get_data(),
+            _ => {
+                assert!(false);
+                return;
+            }
+        };
+
+        for i in 0..4096usize {
+            assert_eq!((i % 8) as u8, page2[i]);
+        }
+
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+
+        // test clock
+        let mut slice: [u8; 4096] = [0; 4096];
+        for i in 0..4096 {
+            slice[i] = (i % 8) as u8;
+        }
+        let mut page = Page::new_phantom(slice);
+        page.page_num = 1;
+        page.file_name = String::from("test.db");
+        let mut buffer = match ClockBuffer::new(10, "metadata.db".to_string()) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        match buffer.add_file(Path::new("test.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+        buffer.fill_up_to("test.db", 10);
+        buffer.write_page(page);
+        buffer.flush_file("test.db");
+
+        let page2 = match buffer.get_page("test.db", 1) {
+            Ok(page) => page.get_data(),
+            _ => {
+                assert!(false);
+                return;
+            }
+        };
+
+        for i in 0..4096usize {
+            assert_eq!((i % 8) as u8, page2[i]);
+        }
+
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+    }
+
+    #[test]
+    fn test_lru_algo() {
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+
+
+        let mut buffer = match LRUBuffer::new(4, "metadata.db".to_string()) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        match buffer.add_file(Path::new("test.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+        buffer.fill_up_to("test.db", 10);
+
+        buffer.get_page("test.db", 2);
+        buffer.get_page("test.db", 4);
+        buffer.get_page("test.db", 3);
+        buffer.get_page("test.db", 1);
+
+        let vec = vec![2, 4, 3, 1];
+
+        let list = &buffer.list;
+        for (i, item) in list.iter().enumerate() {
+            assert_eq!(item.page.page_num, vec[i]);
+        }
+
+        match buffer.get_page("test.db", 5) {
+            Ok(_) => (),
+            Err(_) => {
+                assert!(false);
+                ()
+            }
+        }
+        buffer.get_page("test.db", 7);
+        buffer.get_page("test.db", 3);
+        buffer.get_page("test.db", 6);
+
+        let vec2 = vec![5, 7, 3, 6];
+        let list = &buffer.list;
+        for (i, item) in list.iter().enumerate() {
+            assert_eq!(item.page.page_num, vec2[i]);
+        }
+
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+    }
+
+    #[test]
+    fn test_clock_algo() {
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
+
+        let mut buffer = match ClockBuffer::new(4, "metadata.db".to_string()) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                assert!(false);
+                return;
+            }
+        };
+        match buffer.add_file(Path::new("test.db")) {
+            Ok(_) => (),
+            Err(_) => assert!(false),
+        };
+        buffer.fill_up_to("test.db", 10);
+
+        buffer.get_page("test.db", 2);
+        buffer.get_page("test.db", 4);
+        buffer.get_page("test.db", 3);
+        buffer.get_page("test.db", 1);
+
+        let vec = vec![2, 4, 3, 1];
+
+        let list = &buffer.list;
+        for (i, item) in list.iter().enumerate() {
+            assert_eq!(item.page.page_num, vec[i]);
+        }
+
+        buffer.get_page("test.db", 5);
+        buffer.get_page("test.db", 7);
+        buffer.get_page("test.db", 3);
+        buffer.get_page("test.db", 6);
+
+        let vec2 = vec![5, 7, 3, 6];
+        let list = &buffer.list;
+        for (i, item) in list.iter().enumerate() {
+            assert_eq!(item.page.page_num, vec2[i]);
+        }
+
+        fs::remove_file("metadata.db");
+        fs::remove_file("test.db");
     }
 }
