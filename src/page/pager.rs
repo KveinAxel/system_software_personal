@@ -54,7 +54,50 @@ impl Pager {
             self.fill_up_to(&(2 * self.max_size))?;
         }
         self.cnt += 1;
-        self.get_page(&(self.cnt - 1))
+        self.get_page(&self.cnt.clone())
     }
 }
 
+#[cfg(test)]
+mod test {
+    use crate::util::error::Error;
+    use crate::data_item::buffer::{LRUBuffer, Buffer};
+    use std::fs;
+    use std::path::Path;
+    use crate::page::page_item::Page;
+    use crate::page::pager::Pager;
+
+    #[test]
+    fn test_get_new_page() -> Result<(), Error> {
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+
+        let mut buffer = Box::new(LRUBuffer::new(4, "metadata.db".to_string())?);
+        buffer.add_file(Path::new("test.db"))?;
+        buffer.fill_up_to("test.db", 10)?;
+
+        let mut pager = Pager::new("test.db".to_string(), buffer, 50)?;
+        assert_eq!(pager.cnt, 0);
+        pager.get_new_page();
+        assert_eq!(pager.cnt, 1);
+        pager.get_new_page();
+        assert_eq!(pager.cnt, 2);
+
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        Ok(())
+    }
+
+}
