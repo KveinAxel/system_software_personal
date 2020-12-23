@@ -105,9 +105,9 @@ impl LRUBuffer {
                     .read(true)
                     .write(true)
                     .open(path)?;
-                new_metadata.seek(SeekFrom::Start(0));
-                new_metadata.write_u32::<byteorder::BigEndian>(0);
-                new_metadata.flush();
+                new_metadata.seek(SeekFrom::Start(0))?;
+                new_metadata.write_u32::<byteorder::BigEndian>(0)?;
+                new_metadata.flush()?;
                 hashmap.insert(meta_file_name.clone(), new_metadata);
             }
         }
@@ -500,9 +500,9 @@ impl ClockBuffer {
                     .read(true)
                     .write(true)
                     .open(path)?;
-                new_metadata.seek(SeekFrom::Start(0));
-                new_metadata.write_u32::<byteorder::BigEndian>(0);
-                new_metadata.flush();
+                new_metadata.seek(SeekFrom::Start(0))?;
+                new_metadata.write_u32::<byteorder::BigEndian>(0)?;
+                new_metadata.flush()?;
                 hashmap.insert(meta_file_name.clone(), new_metadata);
             }
         }
@@ -833,106 +833,103 @@ mod test {
     use std::path::Path;
     use std::fs;
     use crate::page::page_item::{PAGE_SIZE, Page};
+    use crate::util::error::Error;
 
     #[test]
-    fn test_add_file() {
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
-
-        let mut buffer = match LRUBuffer::new(10, "metadata.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer.add_file(Path::new("test.db")) {
+    fn test_add_file() -> Result<(), Error> {
+        match fs::remove_file("metadata.db") {
             Ok(_) => (),
-            Err(_) => assert!(false),
+            Err(_) => (),
         };
-
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
-
-        let mut buffer2 = match ClockBuffer::new(10, "metadata.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer2.add_file(Path::new("test.db")) {
+        match fs::remove_file("test.db") {
             Ok(_) => (),
-            Err(_) => assert!(false),
+            Err(_) => (),
         };
 
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
+        let mut buffer = LRUBuffer::new(10, "metadata.db".to_string())?;
+        buffer.add_file(Path::new("test.db"))?;
+
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+
+        let mut buffer2 = ClockBuffer::new(10, "metadata.db".to_string())?;
+        buffer2.add_file(Path::new("test.db"))?;
+
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        Ok(())
     }
 
     #[test]
-    fn test_fill_up_to() {
-        fs::remove_file("metadata.db");
-        fs::remove_file("metadata2.db");
-        fs::remove_file("test2.db");
-
-        let mut buffer = match LRUBuffer::new(10, "metadata2.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer.add_file(Path::new("test2.db")) {
+    fn test_fill_up_to() -> Result<(), Error>{
+        match fs::remove_file("metadata2.db") {
             Ok(_) => (),
-            Err(_) => assert!(false),
+            Err(_) => (),
         };
-        buffer.fill_up_to("test2.db", 10);
-        buffer.flush_file("test2.db");
+        match fs::remove_file("test2.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
 
-        let meta = match fs::metadata(Path::new("test2.db")) {
-            Ok(meta) => meta,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
+        let mut buffer = LRUBuffer::new(10, "metadata2.db".to_string())?;
+        buffer.add_file(Path::new("test2.db"))?;
+        buffer.fill_up_to("test2.db", 10)?;
+        buffer.flush_file("test2.db")?;
+
+        let meta = fs::metadata(Path::new("test2.db"))?;
         assert_eq!(14 * PAGE_SIZE as u64, meta.len());
 
-        fs::remove_file("metadata2.db");
-        fs::remove_file("test2.db");
-
-        let mut buffer = match ClockBuffer::new(10, "metadata2.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer.add_file(Path::new("test2.db")) {
+        match fs::remove_file("metadata2.db") {
             Ok(_) => (),
-            Err(_) => assert!(false),
+            Err(_) => (),
         };
-        buffer.fill_up_to("test2.db", 10);
-        buffer.flush_file("test2.db");
+        match fs::remove_file("test2.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
 
-        let meta = match fs::metadata(Path::new("test2.db")) {
-            Ok(meta) => meta,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
+        let mut buffer = ClockBuffer::new(10, "metadata2.db".to_string())?;
+        buffer.add_file(Path::new("test2.db"))?;
+
+        buffer.fill_up_to("test2.db", 10)?;
+        buffer.flush_file("test2.db")?;
+
+        let meta = fs::metadata(Path::new("test2.db"))?;
         assert_eq!(14 * PAGE_SIZE as u64, meta.len());
 
-        fs::remove_file("metadata2.db");
-        fs::remove_file("test2.db");
+        match fs::remove_file("metadata2.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test2.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        Ok(())
     }
 
     #[test]
-    fn test_page_get_write() {
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
+    fn test_page_get_write() -> Result<(), Error> {
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
 
         // test lru
         let mut slice: [u8; 4096] = [0; 4096];
@@ -942,35 +939,26 @@ mod test {
         let mut page = Page::new_phantom(slice);
         page.page_num = 1;
         page.file_name = String::from("test.db");
-        let mut buffer = match LRUBuffer::new(10, "metadata.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer.add_file(Path::new("test.db")) {
-            Ok(_) => (),
-            Err(_) => assert!(false),
-        };
-        buffer.fill_up_to("test.db", 10);
-        buffer.write_page(page);
-        buffer.flush_file("test.db");
+        let mut buffer = LRUBuffer::new(10, "metadata.db".to_string())?;
+        buffer.add_file(Path::new("test.db"))?;
+        buffer.fill_up_to("test.db", 10)?;
+        buffer.write_page(page)?;
+        buffer.flush_file("test.db")?;
 
-        let page2 = match buffer.get_page("test.db", 1) {
-            Ok(page) => page.get_data(),
-            _ => {
-                assert!(false);
-                return;
-            }
-        };
+        let page2 = buffer.get_page("test.db", 1)?.get_data();
 
         for i in 0..4096usize {
             assert_eq!((i % 8) as u8, page2[i]);
         }
 
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
 
         // test clock
         let mut slice: [u8; 4096] = [0; 4096];
@@ -980,60 +968,49 @@ mod test {
         let mut page = Page::new_phantom(slice);
         page.page_num = 1;
         page.file_name = String::from("test.db");
-        let mut buffer = match ClockBuffer::new(10, "metadata.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer.add_file(Path::new("test.db")) {
-            Ok(_) => (),
-            Err(_) => assert!(false),
-        };
-        buffer.fill_up_to("test.db", 10);
-        buffer.write_page(page);
-        buffer.flush_file("test.db");
+        let mut buffer = ClockBuffer::new(10, "metadata.db".to_string())?;
+        buffer.add_file(Path::new("test.db"))?;
+        buffer.fill_up_to("test.db", 10)?;
+        buffer.write_page(page)?;
+        buffer.flush_file("test.db")?;
 
-        let page2 = match buffer.get_page("test.db", 1) {
-            Ok(page) => page.get_data(),
-            _ => {
-                assert!(false);
-                return;
-            }
-        };
+        let page2 = buffer.get_page("test.db", 1)?.get_data();
 
         for i in 0..4096usize {
             assert_eq!((i % 8) as u8, page2[i]);
         }
 
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        Ok(())
     }
 
     #[test]
-    fn test_lru_algo() {
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
-
-
-        let mut buffer = match LRUBuffer::new(4, "metadata.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer.add_file(Path::new("test.db")) {
+    fn test_lru_algo() -> Result<(), Error> {
+        match fs::remove_file("metadata.db") {
             Ok(_) => (),
-            Err(_) => assert!(false),
+            Err(_) => (),
         };
-        buffer.fill_up_to("test.db", 10);
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
 
-        buffer.get_page("test.db", 2);
-        buffer.get_page("test.db", 4);
-        buffer.get_page("test.db", 3);
-        buffer.get_page("test.db", 1);
+
+        let mut buffer = LRUBuffer::new(4, "metadata.db".to_string())?;
+        buffer.add_file(Path::new("test.db"))?;
+        buffer.fill_up_to("test.db", 10)?;
+
+        buffer.get_page("test.db", 2)?;
+        buffer.get_page("test.db", 4)?;
+        buffer.get_page("test.db", 3)?;
+        buffer.get_page("test.db", 1)?;
 
         let vec = vec![2, 4, 3, 1];
 
@@ -1042,16 +1019,10 @@ mod test {
             assert_eq!(item.page.page_num, vec[i]);
         }
 
-        match buffer.get_page("test.db", 5) {
-            Ok(_) => (),
-            Err(_) => {
-                assert!(false);
-                ()
-            }
-        }
-        buffer.get_page("test.db", 7);
-        buffer.get_page("test.db", 3);
-        buffer.get_page("test.db", 6);
+        buffer.get_page("test.db", 5)?;
+        buffer.get_page("test.db", 7)?;
+        buffer.get_page("test.db", 3)?;
+        buffer.get_page("test.db", 6)?;
 
         let vec2 = vec![5, 7, 3, 6];
         let list = &buffer.list;
@@ -1059,32 +1030,36 @@ mod test {
             assert_eq!(item.page.page_num, vec2[i]);
         }
 
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        Ok(())
     }
 
     #[test]
-    fn test_clock_algo() {
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
-
-        let mut buffer = match ClockBuffer::new(4, "metadata.db".to_string()) {
-            Ok(buffer) => buffer,
-            Err(_) => {
-                assert!(false);
-                return;
-            }
-        };
-        match buffer.add_file(Path::new("test.db")) {
+    fn test_clock_algo() -> Result<(), Error> {
+        match fs::remove_file("metadata.db") {
             Ok(_) => (),
-            Err(_) => assert!(false),
+            Err(_) => (),
         };
-        buffer.fill_up_to("test.db", 10);
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
 
-        buffer.get_page("test.db", 2);
-        buffer.get_page("test.db", 4);
-        buffer.get_page("test.db", 3);
-        buffer.get_page("test.db", 1);
+        let mut buffer = ClockBuffer::new(4, "metadata.db".to_string())?;
+        buffer.add_file(Path::new("test.db"))?;
+        buffer.fill_up_to("test.db", 10)?;
+
+        buffer.get_page("test.db", 2)?;
+        buffer.get_page("test.db", 4)?;
+        buffer.get_page("test.db", 3)?;
+        buffer.get_page("test.db", 1)?;
 
         let vec = vec![2, 4, 3, 1];
 
@@ -1093,10 +1068,10 @@ mod test {
             assert_eq!(item.page.page_num, vec[i]);
         }
 
-        buffer.get_page("test.db", 5);
-        buffer.get_page("test.db", 7);
-        buffer.get_page("test.db", 3);
-        buffer.get_page("test.db", 6);
+        buffer.get_page("test.db", 5)?;
+        buffer.get_page("test.db", 7)?;
+        buffer.get_page("test.db", 3)?;
+        buffer.get_page("test.db", 6)?;
 
         let vec2 = vec![5, 7, 3, 6];
         let list = &buffer.list;
@@ -1104,7 +1079,14 @@ mod test {
             assert_eq!(item.page.page_num, vec2[i]);
         }
 
-        fs::remove_file("metadata.db");
-        fs::remove_file("test.db");
+        match fs::remove_file("metadata.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test.db") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        Ok(())
     }
 }

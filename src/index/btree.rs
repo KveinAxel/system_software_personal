@@ -22,8 +22,8 @@ pub struct BTree {
 
 impl BTree {
     fn new(mut pager: Pager, file_name: String) -> Result<BTree, Error> {
-        let mut page = pager.get_new_page()?;
-        let mut root =
+        let page = pager.get_new_page()?;
+        let root =
             Arc::new(
                 RwLock::new(
                     Node::new(
