@@ -65,19 +65,13 @@ mod test {
     use std::fs;
     use std::path::Path;
     use crate::page::pager::Pager;
+    use crate::util::test_lib::{rm_test_file, gen_buffer};
 
     #[test]
-    fn test_get_new_page() -> Result<(), Error> {
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+    fn test_get_new_pager() -> Result<(), Error> {
+        rm_test_file();
 
-        let mut buffer = Box::new(LRUBuffer::new(4, "metadata.db".to_string())?);
+        let mut buffer = gen_buffer()?;
         buffer.add_file(Path::new("test.db"))?;
         buffer.fill_up_to("test.db", 10)?;
 
@@ -88,14 +82,7 @@ mod test {
         pager.get_new_page();
         assert_eq!(pager.cnt, 2);
 
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
         Ok(())
     }
 

@@ -834,41 +834,21 @@ mod test {
     use std::fs;
     use crate::page::page_item::{PAGE_SIZE, Page};
     use crate::util::error::Error;
+    use crate::util::test_lib::rm_test_file;
 
     #[test]
     fn test_add_file() -> Result<(), Error> {
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
 
         let mut buffer = LRUBuffer::new(10, "metadata.db".to_string())?;
         buffer.add_file(Path::new("test.db"))?;
 
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
 
         let mut buffer2 = ClockBuffer::new(10, "metadata.db".to_string())?;
         buffer2.add_file(Path::new("test.db"))?;
 
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
         Ok(())
     }
 
@@ -916,20 +896,12 @@ mod test {
         match fs::remove_file("test2.db") {
             Ok(_) => (),
             Err(_) => (),
-        };
-        Ok(())
+        };        Ok(())
     }
 
     #[test]
     fn test_page_get_write() -> Result<(), Error> {
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
 
         // test lru
         let mut slice: [u8; 4096] = [0; 4096];
@@ -951,14 +923,7 @@ mod test {
             assert_eq!((i % 8) as u8, page2[i]);
         }
 
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
 
         // test clock
         let mut slice: [u8; 4096] = [0; 4096];
@@ -980,28 +945,13 @@ mod test {
             assert_eq!((i % 8) as u8, page2[i]);
         }
 
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
         Ok(())
     }
 
     #[test]
     fn test_lru_algo() -> Result<(), Error> {
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-
+        rm_test_file();
 
         let mut buffer = LRUBuffer::new(4, "metadata.db".to_string())?;
         buffer.add_file(Path::new("test.db"))?;
@@ -1030,27 +980,13 @@ mod test {
             assert_eq!(item.page.page_num, vec2[i]);
         }
 
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
         Ok(())
     }
 
     #[test]
     fn test_clock_algo() -> Result<(), Error> {
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
 
         let mut buffer = ClockBuffer::new(4, "metadata.db".to_string())?;
         buffer.add_file(Path::new("test.db"))?;
@@ -1079,14 +1015,7 @@ mod test {
             assert_eq!(item.page.page_num, vec2[i]);
         }
 
-        match fs::remove_file("metadata.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
-        match fs::remove_file("test.db") {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        rm_test_file();
         Ok(())
     }
 }
