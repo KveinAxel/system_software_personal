@@ -85,7 +85,12 @@ impl Page {
         offset: usize,
         size: usize,
     ) -> Result<(), Error> {
-        self.data[offset..offset + size].clone_from_slice(&bytes);
+        let siz = if bytes.len() < size {
+            bytes.len()
+        } else {
+            size
+        };
+        self.data[offset..offset + siz].clone_from_slice(&bytes);
         Ok(())
     }
 
@@ -115,5 +120,14 @@ impl TryFrom<&[u8]> for Value {
         }
 
         Ok(Value(usize::from_be_bytes(truncated_arr)))
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn test_needed_here() {
+        // todo
     }
 }

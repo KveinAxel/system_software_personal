@@ -21,13 +21,13 @@ pub struct BTree {
 }
 
 impl BTree {
-    fn new(mut pager: Pager, file_name: String) -> Result<BTree, Error> {
+    pub(crate) fn new(mut pager: Pager, file_name: String) -> Result<BTree, Error> {
         let page = pager.get_new_page()?;
         let root =
             Arc::new(
                 RwLock::new(
                     Node::new(
-                        NodeType::Internal,
+                        NodeType::Leaf,
                         0,
                         page.page_num,
                         true,
@@ -209,7 +209,7 @@ impl BTree {
                                 None => Err(Error::UnexpectedError)
                             };
                         } else {
-                            Err(Error::UnexpectedError)
+                            Err(Error::KeyNotFound)
                         }
                     }
                 }
@@ -254,5 +254,76 @@ impl BTree {
             }
             Ok(())
         };
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::util::error::Error;
+    use crate::util::test_lib::{rm_test_file, gen_tree, gen_kv, gen_2_kv};
+    use crate::index::key_value_pair::KeyValuePair;
+
+    #[test]
+    fn test_search_empty_tree() -> Result<(), Error> {
+        rm_test_file();
+
+        let mut tree = gen_tree()?;
+
+        let kv = gen_kv()?;
+        match tree.search(kv.key) {
+            Err(Error::KeyNotFound) => (),
+            _ => {
+                assert!(false);
+            }
+        }
+
+        rm_test_file();
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_search_tree() -> Result<(), Error> {
+        rm_test_file();
+
+        let mut tree = gen_tree()?;
+
+        let (kv1, kv2) = gen_2_kv()?;
+
+        tree.insert(kv1)?;
+        tree.insert(kv2)?;
+
+        let res1 = tree.search("Hello".to_string())?;
+        assert_eq!(res1.value, "World".to_string());
+        let res2 = tree.search("Test".to_string())?;
+        assert_eq!(res2.value, "BTree".to_string());
+        match tree.search("not_exist".to_string()) {
+            Err(Error::KeyNotFound) => (),
+            _ => {
+                assert!(false);
+            }
+        }
+
+        rm_test_file();
+        Ok(())
+    }
+
+    #[test]
+    fn test_update() ->Result<(), Error> {
+        rm_test_file();
+        let mut tree = gen_tree()?;
+
+        let (kv1, kv2) = gen_2_kv()?;
+
+        tree.insert(kv1.clone());
+        assert_eq!(tree.search(kv1.key.clone())?.value.trim(), kv1.value.trim());
+
+        let kv3 = KeyValuePair::new(kv1.key.clone(), kv2.value.clone());
+        tree.update(kv3);
+
+        assert_ne!(tree.search(kv1.key.clone())?.value.trim(), kv1.value.trim());
+        assert_eq!(tree.search(kv1.key.clone())?.value.trim(), kv2.value.trim());
+
+        rm_test_file();
+        Ok(())
     }
 }

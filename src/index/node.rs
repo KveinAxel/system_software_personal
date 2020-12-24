@@ -409,7 +409,7 @@ impl Node {
                         Err(_) => return Err(Error::UTF8Error),
                     };
                     offset += KEY_SIZE;
-                    if key == kv.key {
+                    if key.trim_matches(char::from(0)) == kv.key.trim_matches(char::from(0)) {
                         let value_raw = kv.value.as_bytes();
                         self.page.write_bytes_at_offset(value_raw, offset, VALUE_SIZE)?;
                         return Ok(());

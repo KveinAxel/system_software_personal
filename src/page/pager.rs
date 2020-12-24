@@ -64,7 +64,6 @@ mod test {
     use crate::data_item::buffer::{LRUBuffer, Buffer};
     use std::fs;
     use std::path::Path;
-    use crate::page::page_item::Page;
     use crate::page::pager::Pager;
 
     #[test]
