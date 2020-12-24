@@ -55,19 +55,19 @@ impl Table {
     }
 }
 
-// impl Clone for Table {
-//     fn clone(&self) -> Self {
-//         let mut fields = Vec::<Field>::new();
-//         for i in &self.fields {
-//             fields.push(i.clone());
-//         }
-//         Table {
-//             table_manager: self.table_manager.clone(),
-//             table_name: self.table_name.clone(),
-//             next_table: self.next_table.clone(),
-//             self_uuid: self.self_uuid.clone(),
-//             status: self.status.clone(),
-//             fields,
-//         }
-//     }
-// }
+impl Clone for Table {
+    fn clone(&self) -> Self {
+        let mut fields = Vec::<Field>::new();
+        for i in &self.fields {
+            fields.push(i.clone());
+        }
+        Table {
+            table_manager: self.table_manager.clone(),
+            table_name: self.table_name.clone(),
+            next_table: self.next_table.clone(),
+            self_uuid: self.self_uuid.clone(),
+            status: self.status.clone(),
+            fields,
+        }
+    }
+}

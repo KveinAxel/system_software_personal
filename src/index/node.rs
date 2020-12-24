@@ -443,7 +443,7 @@ impl Node {
 
     /// 分裂内部节点
     /// !!!不做任何检查!!!
-    fn split_internal(&mut self, pager: &mut Pager, mut buffer: &Box<dyn Buffer>) -> Result<(Node, String, Node), Error> {
+    fn split_internal(&mut self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<(Node, String, Node), Error> {
         let mut offset = INTERNAL_NODE_KEY_OFFSET;
         let num_key = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
         let children = self.get_children()?;
@@ -501,7 +501,7 @@ impl Node {
 
     /// 分裂叶子节点
     /// !!!不做任何检查!!!
-    fn split_leaf(&mut self, pager: &mut Pager, mut buffer: &Box<dyn Buffer>) -> Result<(Node, String, Node), Error> {
+    fn split_leaf(&mut self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<(Node, String, Node), Error> {
         // 初始化新的左右叶子节点
         let mut kv_pairs = self.get_key_value_pairs()?;
         let left_leaf_page = pager.get_new_page(buffer)?;
@@ -524,7 +524,7 @@ impl Node {
 
 
     /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
-    pub(crate) fn split(&mut self, pager: &mut Pager, mut buffer: &Box<dyn Buffer>) -> Result<bool, Error> {
+    pub(crate) fn split(&mut self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<bool, Error> {
         if self.is_root {
 
             // 根节点不满足分裂要求

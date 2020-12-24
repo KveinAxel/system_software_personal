@@ -1,10 +1,10 @@
 use std::fs;
 use crate::data_item::buffer::{LRUBuffer, Buffer};
 use crate::page::pager::Pager;
-use std::path::Path;
 use crate::util::error::Error;
 use crate::index::btree::BTree;
 use crate::index::key_value_pair::KeyValuePair;
+use std::path::Path;
 
 pub fn rm_test_file() {
     match fs::remove_file("metadata.db") {
@@ -18,14 +18,18 @@ pub fn rm_test_file() {
 }
 
 pub fn gen_buffer() -> Result<Box<dyn Buffer>, Error> {
-    return Ok(Box::new(LRUBuffer::new(4, "metadata.db".to_string())?));
+    let mut buffer = Box::new(LRUBuffer::new(4, "metadata.db".to_string())?);
+    buffer.add_file(Path::new("test.db"))?;
+    buffer.fill_up_to("test.db", 10)?;
+
+    return Ok(buffer);
 }
 
-pub fn gen_pager(mut buffer: &Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
+pub fn gen_pager(buffer: &mut Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
     return Ok(Pager::new("test.db".to_string(), 50, buffer)?);
 }
 
-pub fn gen_tree(mut buffer: &Box<dyn Buffer>) -> Result<BTree, Error> {
+pub fn gen_tree(buffer: &mut Box<dyn Buffer>) -> Result<BTree, Error> {
     let pager = gen_pager(buffer)?;
     BTree::new(*pager, "test.db".to_string(), buffer)
 }

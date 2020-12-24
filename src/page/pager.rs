@@ -10,8 +10,18 @@ pub struct Pager {
     file_name: String
 }
 
+impl Clone for Pager {
+    fn clone(&self) -> Self {
+        Self {
+            cnt: self.cnt,
+            max_size: self.max_size,
+            file_name: self.file_name.clone()
+        }
+    }
+}
+
 impl Pager {
-    pub fn new(file_name: String, max_size: usize, mut buffer: &Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
+    pub fn new(file_name: String, max_size: usize, buffer: &mut Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
         let mut pager = Box::new(
             Pager {
                 cnt: 0,
@@ -24,29 +34,29 @@ impl Pager {
     }
 
     /// 将文件大小扩充到指定页数
-    pub fn fill_up_to(&mut self, num_of_page: &usize, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn fill_up_to(&mut self, num_of_page: &usize, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         buffer.fill_up_to(self.file_name.as_str(), *num_of_page)
     }
 
     /// 读取一个页
-    pub fn get_page(&mut self, page_num: &usize, mut buffer: &Box<dyn Buffer>) -> Result<Page, Error> {
+    pub fn get_page(&mut self, page_num: &usize, buffer: &mut Box<dyn Buffer>) -> Result<Page, Error> {
         buffer.get_page(self.file_name.as_str(), *page_num)
     }
 
     /// 向文件写入一个页
-    pub fn write_page(&mut self, page: Page, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn write_page(&mut self, page: Page, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         buffer.write_page(page)
     }
 
-    pub fn get_first_uuid(&mut self, mut buffer: &Box<dyn Buffer>) -> Result<Uuid, Error> {
+    pub fn get_first_uuid(&mut self, buffer: &mut Box<dyn Buffer>) -> Result<Uuid, Error> {
         buffer.get_first_uuid()
     }
 
-    pub fn update_first_uuid(&mut self, uuid: Uuid, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn update_first_uuid(&mut self, uuid: Uuid, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         buffer.update_first_uuid(uuid)
     }
 
-    pub fn get_new_page(&mut self, mut buffer: &Box<dyn Buffer>) -> Result<Page, Error> {
+    pub fn get_new_page(&mut self, buffer: &mut Box<dyn Buffer>) -> Result<Page, Error> {
         // 如果文件大小不够，则扩大文件
         if self.cnt >= self.max_size {
             self.fill_up_to(&(2 * self.max_size), buffer)?;
@@ -68,14 +78,11 @@ mod test {
         rm_test_file();
 
         let mut buffer = gen_buffer()?;
-        buffer.add_file(Path::new("test.db"))?;
-        buffer.fill_up_to("test.db", 10)?;
-
-        let mut pager = Pager::new("test.db".to_string(), 50, &buffer)?;
+        let mut pager = Pager::new("test.db".to_string(), 50, &mut buffer)?;
         assert_eq!(pager.cnt, 0);
-        pager.get_new_page(&buffer);
+        pager.get_new_page(&mut buffer)?;
         assert_eq!(pager.cnt, 1);
-        pager.get_new_page(&buffer);
+        pager.get_new_page(&mut buffer)?;
         assert_eq!(pager.cnt, 2);
 
         rm_test_file();

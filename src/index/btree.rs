@@ -21,9 +21,19 @@ pub struct BTree {
     pager: Pager,
 }
 
+impl Clone for BTree {
+    fn clone(&self) -> Self {
+        Self {
+            file_name: self.file_name.clone(),
+            root: Arc::clone(&self.root),
+            pager: self.pager.clone(),
+        }
+    }
+}
+
 impl BTree {
-    pub(crate) fn new(mut pager: Pager, file_name: String, mut buffer: &Box<dyn Buffer>) -> Result<BTree, Error> {
-        let page = pager.get_new_page(&buffer)?;
+    pub(crate) fn new(mut pager: Pager, file_name: String, buffer: &mut Box<dyn Buffer>) -> Result<BTree, Error> {
+        let page = pager.get_new_page(buffer)?;
         let root =
             Arc::new(
                 RwLock::new(
@@ -45,7 +55,7 @@ impl BTree {
     }
 
     /// 在树上查询一个键
-    pub fn search(&mut self, key: String, mut buffer: &Box<dyn Buffer>) -> Result<KeyValuePair, Error> {
+    pub fn search(&mut self, key: String, buffer: &mut Box<dyn Buffer>) -> Result<KeyValuePair, Error> {
         let (_, kv) = self.search_node(Arc::clone(&self.root), &key, false, buffer)?;
         return match kv {
             Some(kv) => Ok(kv),
@@ -54,7 +64,7 @@ impl BTree {
     }
 
     /// 插入一个键值对，可能沿途分裂节点
-    pub fn insert(&mut self, kv: KeyValuePair, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn insert(&mut self, kv: KeyValuePair, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, true, buffer)?;
         match kv_pair_exists {
             // 树中已经有键了
@@ -80,7 +90,7 @@ impl BTree {
 
 
     /// 将key所对应的值更新为value
-    pub fn update(&mut self, kv: KeyValuePair, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn update(&mut self, kv: KeyValuePair, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, false, buffer)?;
         match kv_pair_exists {
             None => return Err(Error::KeyNotFound),
@@ -94,7 +104,7 @@ impl BTree {
     }
 
     /// 查找并删除满足key的叶子节点
-    pub fn delete(&mut self, key: String, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn delete(&mut self, key: String, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &key, false, buffer)?;
         match kv_pair_exists {
             None => return Err(Error::KeyNotFound),
@@ -118,7 +128,7 @@ impl BTree {
         node: Arc<RwLock<Node>>,
         search_key: &String,
         inserted: bool,
-        mut buffer: &Box<dyn Buffer>
+        buffer: &mut Box<dyn Buffer>
     ) -> Result<(Arc<RwLock<Node>>, Option<KeyValuePair>), Error> {
 
         // 获取待查询子树的读权限
@@ -224,7 +234,7 @@ impl BTree {
 
     /// 沿当前节点向上检查所有的节点是否超过最大节点数
     /// 若超过，则分裂
-    fn split_node(&mut self, node: Arc<RwLock<Node>>, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+    fn split_node(&mut self, node: Arc<RwLock<Node>>, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
 
         // 获取写权限
         let mut guarded_node = match node.write() {
@@ -264,16 +274,17 @@ mod test {
     use crate::util::error::Error;
     use crate::util::test_lib::{rm_test_file, gen_tree, gen_kv, gen_2_kv, gen_buffer};
     use crate::index::key_value_pair::KeyValuePair;
+    use std::path::Path;
 
     #[test]
     fn test_search_empty_tree() -> Result<(), Error> {
         rm_test_file();
 
         let mut buffer = gen_buffer()?;
-        let mut tree = gen_tree(&buffer)?;
+        let mut tree = gen_tree(&mut buffer)?;
 
         let kv = gen_kv()?;
-        match tree.search(kv.key, &buffer) {
+        match tree.search(kv.key, &mut buffer) {
             Err(Error::KeyNotFound) => (),
             _ => {
                 assert!(false);
@@ -289,18 +300,18 @@ mod test {
         rm_test_file();
 
         let mut buffer = gen_buffer()?;
-        let mut tree = gen_tree(&buffer)?;
+        let mut tree = gen_tree(&mut buffer)?;
 
         let (kv1, kv2) = gen_2_kv()?;
 
-        tree.insert(kv1, &buffer)?;
-        tree.insert(kv2, &buffer)?;
+        tree.insert(kv1, &mut buffer)?;
+        tree.insert(kv2, &mut buffer)?;
 
-        let res1 = tree.search("Hello".to_string(), &buffer)?;
+        let res1 = tree.search("Hello".to_string(), &mut buffer)?;
         assert_eq!(res1.value, "World".to_string());
-        let res2 = tree.search("Test".to_string(), &buffer)?;
+        let res2 = tree.search("Test".to_string(), &mut buffer)?;
         assert_eq!(res2.value, "BTree".to_string());
-        match tree.search("not_exist".to_string(), &buffer) {
+        match tree.search("not_exist".to_string(), &mut buffer) {
             Err(Error::KeyNotFound) => (),
             _ => {
                 assert!(false);
@@ -316,18 +327,18 @@ mod test {
         rm_test_file();
 
         let mut buffer = gen_buffer()?;
-        let mut tree = gen_tree(&buffer)?;
+        let mut tree = gen_tree(&mut buffer)?;
 
         let (kv1, kv2) = gen_2_kv()?;
 
-        tree.insert(kv1.clone(), &buffer);
-        assert_eq!(tree.search(kv1.key.clone(), &buffer)?.value.trim(), kv1.value.trim());
+        tree.insert(kv1.clone(), &mut buffer)?;
+        assert_eq!(tree.search(kv1.key.clone(), &mut buffer)?.value.trim(), kv1.value.trim());
 
         let kv3 = KeyValuePair::new(kv1.key.clone(), kv2.value.clone());
-        tree.update(kv3, &buffer);
+        tree.update(kv3, &mut buffer)?;
 
-        assert_ne!(tree.search(kv1.key.clone(), &buffer)?.value.trim(), kv1.value.trim());
-        assert_eq!(tree.search(kv1.key.clone(), &buffer)?.value.trim(), kv2.value.trim());
+        assert_ne!(tree.search(kv1.key.clone(), &mut buffer)?.value.trim(), kv1.value.trim());
+        assert_eq!(tree.search(kv1.key.clone(), &mut buffer)?.value.trim(), kv2.value.trim());
 
         rm_test_file();
         Ok(())

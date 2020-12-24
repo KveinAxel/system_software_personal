@@ -31,18 +31,18 @@ pub struct Field {
     btree: BTree,
 }
 
-// impl Clone for Field {
-//     fn clone(&self) -> Self {
-//         Self {
-//             self_uuid: self.self_uuid.clone(),
-//             table: self.table.clone(),
-//             field_name: self.field_name.clone(),
-//             field_type: self.field_type.clone(),
-//             index: self.index.clone(),
-//             btree: self.btree.clone(),
-//         }
-//     }
-// }
+impl Clone for Field {
+    fn clone(&self) -> Self {
+        Self {
+            self_uuid: self.self_uuid.clone(),
+            table: self.table.clone(),
+            field_name: self.field_name.clone(),
+            field_type: self.field_type.clone(),
+            index: self.index.clone(),
+            btree: self.btree.clone(),
+        }
+    }
+}
 
 impl Field {
     fn load_field(table: &Table, uuid: Uuid) -> Result<Field, Error> {

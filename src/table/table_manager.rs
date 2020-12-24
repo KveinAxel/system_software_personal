@@ -6,7 +6,6 @@ use crate::page::pager::Pager;
 use crate::table::field::Field;
 use crate::table::table_item::Table;
 use crate::util::error::Error;
-use crate::index::btree::BTree;
 use crate::data_item::buffer::Buffer;
 
 pub struct TableManager {
@@ -35,12 +34,12 @@ impl TableManager {
     }
 
     pub fn first_uuid(&mut self) -> Result<Uuid, Error> {
-        let uuid = self.pager.get_first_uuid(&self.buffer)?;
+        let uuid = self.pager.get_first_uuid(&mut self.buffer)?;
         Ok(uuid)
     }
 
     pub fn update_first_uuid(&mut self, uuid: Uuid) -> Result<(), Error> {
-        self.pager.update_first_uuid(uuid, &self.buffer)
+        self.pager.update_first_uuid(uuid, &mut self.buffer)
     }
 
     pub fn read_full_table(&self, table_name: String) -> Result<Table, Error> {
