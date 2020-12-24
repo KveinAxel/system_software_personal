@@ -31,7 +31,7 @@ pub fn gen_pager(buffer: &mut Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
 
 pub fn gen_tree(buffer: &mut Box<dyn Buffer>) -> Result<BTree, Error> {
     let pager = gen_pager(buffer)?;
-    BTree::new(*pager, "test.db".to_string(), buffer)
+    BTree::new(pager, "test.db".to_string(), buffer)
 }
 
 pub fn gen_2_kv() -> Result<(KeyValuePair, KeyValuePair), Error> {

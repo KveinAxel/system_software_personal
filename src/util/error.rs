@@ -10,6 +10,9 @@ pub enum Error {
     TableNotFound,
     FileNotFound,
     PageNumOutOfSize,
+    FieldValueTooLong,
+    FieldValueNotCompatible,
+    IndexWithoutBTree,
 }
 
 impl std::convert::From<std::io::Error> for Error {

@@ -2,6 +2,7 @@ use crate::data_item::buffer::Buffer;
 use crate::page::page_item::{Page};
 use crate::util::error::Error;
 use uuid::Uuid;
+use crate::table::field::FieldValue;
 
 /// 每个 Pager 管理一个文件
 pub struct Pager {
@@ -63,6 +64,16 @@ impl Pager {
         }
         self.cnt += 1;
         self.get_page(&self.cnt.clone(), buffer)
+    }
+
+    pub fn insert_value(&mut self, bytes: &[u8], buffer: &mut Box<dyn Buffer>) -> Result<usize, Error> {
+        // todo
+        unimplemented!()
+    }
+
+    pub fn get_value(&self, offset:usize, size: usize, buffer: &mut Box<dyn Buffer>) -> Result<FieldValue, Error> {
+        // todo
+        unimplemented!()
     }
 }
 

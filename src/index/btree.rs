@@ -6,7 +6,6 @@ use crate::index::node::{Node, NodeSpec, NodeType};
 use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
-use std::borrow::BorrowMut;
 use crate::data_item::buffer::Buffer;
 
 /// B+树 配置
@@ -18,7 +17,7 @@ pub const NODE_KEYS_LIMIT: usize = MAX_BRANCHING_FACTOR - 1;
 pub struct BTree {
     file_name: String,
     root: Arc<RwLock<Node>>,
-    pager: Pager,
+    pub(crate) pager: Box<Pager>,
 }
 
 impl Clone for BTree {
@@ -32,7 +31,7 @@ impl Clone for BTree {
 }
 
 impl BTree {
-    pub(crate) fn new(mut pager: Pager, file_name: String, buffer: &mut Box<dyn Buffer>) -> Result<BTree, Error> {
+    pub(crate) fn new(mut pager: Box<Pager>, file_name: String, buffer: &mut Box<dyn Buffer>) -> Result<BTree, Error> {
         let page = pager.get_new_page(buffer)?;
         let root =
             Arc::new(
@@ -82,7 +81,7 @@ impl BTree {
             guarded_node.add_key_value_pair(kv)?;
             // 将对应页写入磁盘.
             return self
-                .pager.borrow_mut()
+                .pager.as_mut()
                 .write_page(Page::new(guarded_node.page.get_data(), &guarded_node.page.file_name, guarded_node.page.page_num), buffer);
         }
         self.split_node(Arc::clone(&node), buffer)
@@ -182,7 +181,7 @@ impl BTree {
                         let page_num = child_offset / PAGE_SIZE;
                         let child_node = Node::try_from(NodeSpec {
                             offset: *child_offset,
-                            page_data: self.pager.borrow_mut().get_page(&page_num, buffer)?.get_data(),
+                            page_data: self.pager.as_mut().get_page(&page_num, buffer)?.get_data(),
                         })?;
                         return self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted, buffer);
                     }
@@ -208,7 +207,7 @@ impl BTree {
                                         None => return Err(Error::UnexpectedError),
                                         Some(child_offset) => child_offset,
                                     };
-                                    let pager = self.pager.borrow_mut();
+                                    let pager = self.pager.as_mut();
                                     let page_num = child_offset / PAGE_SIZE;
                                     let child_node = Node::try_from(NodeSpec {
                                         offset: *child_offset,
