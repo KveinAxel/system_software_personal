@@ -1,6 +1,6 @@
 use uuid::Uuid;
 use crate::table::table_item::Table;
-use std::rc::{Weak, Rc};
+use std::rc::{Weak};
 use crate::index::btree::BTree;
 use crate::util::error::Error;
 
@@ -28,21 +28,21 @@ pub struct Field {
     field_name: String,
     field_type: FieldType,
     index: Uuid,
-    btree: Rc<BTree>,
+    btree: BTree,
 }
 
-impl Clone for Field {
-    fn clone(&self) -> Self {
-        Self {
-            self_uuid: self.self_uuid.clone(),
-            table: self.table.clone(),
-            field_name: self.field_name.clone(),
-            field_type: self.field_type.clone(),
-            index: self.index.clone(),
-            btree: self.btree.clone(),
-        }
-    }
-}
+// impl Clone for Field {
+//     fn clone(&self) -> Self {
+//         Self {
+//             self_uuid: self.self_uuid.clone(),
+//             table: self.table.clone(),
+//             field_name: self.field_name.clone(),
+//             field_type: self.field_type.clone(),
+//             index: self.index.clone(),
+//             btree: self.btree.clone(),
+//         }
+//     }
+// }
 
 impl Field {
     fn load_field(table: &Table, uuid: Uuid) -> Result<Field, Error> {
@@ -99,5 +99,51 @@ impl Field {
 
     fn calc_exp() -> Result<(), Error> {
         Err(Error::UnexpectedError)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::util::error::Error;
+    use crate::util::test_lib::rm_test_file;
+
+    #[test]
+    fn test_create_field() -> Result<(), Error> {
+        rm_test_file();
+
+        rm_test_file();
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_field() -> Result<(), Error> {
+        rm_test_file();
+
+        rm_test_file();
+        Ok(())
+    }
+
+    #[test]
+    fn test_persist() -> Result<(), Error> {
+        rm_test_file();
+
+        rm_test_file();
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert() -> Result<(), Error> {
+        rm_test_file();
+
+        rm_test_file();
+        Ok(())
+    }
+
+    #[test]
+    fn test_search() -> Result<(), Error> {
+        rm_test_file();
+
+        rm_test_file();
+        Ok(())
     }
 }

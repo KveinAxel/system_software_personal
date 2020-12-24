@@ -21,17 +21,13 @@ pub fn gen_buffer() -> Result<Box<dyn Buffer>, Error> {
     return Ok(Box::new(LRUBuffer::new(4, "metadata.db".to_string())?));
 }
 
-pub fn gen_pager() -> Result<Box<Pager>, Error> {
-    let mut buffer = Box::new(LRUBuffer::new(4, "metadata.db".to_string())?);
-    buffer.add_file(Path::new("test.db"))?;
-    buffer.fill_up_to("test.db", 10)?;
-
-    return Ok(Pager::new("test.db".to_string(), buffer, 50)?);
+pub fn gen_pager(mut buffer: &Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
+    return Ok(Pager::new("test.db".to_string(), 50, buffer)?);
 }
 
-pub fn gen_tree() -> Result<BTree, Error> {
-    let pager = gen_pager()?;
-    BTree::new(*pager, "test.db".to_string())
+pub fn gen_tree(mut buffer: &Box<dyn Buffer>) -> Result<BTree, Error> {
+    let pager = gen_pager(buffer)?;
+    BTree::new(*pager, "test.db".to_string(), buffer)
 }
 
 pub fn gen_2_kv() -> Result<(KeyValuePair, KeyValuePair), Error> {

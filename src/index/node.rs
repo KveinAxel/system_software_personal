@@ -7,6 +7,7 @@ use crate::index::key_value_pair::KeyValuePair;
 use crate::page::page_item::{Page, PAGE_SIZE, PTR_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
+use crate::data_item::buffer::Buffer;
 
 /// 通用的节点头的格式 (共计 10 个字节)
 const IS_ROOT_SIZE: usize = 1;
@@ -442,13 +443,13 @@ impl Node {
 
     /// 分裂内部节点
     /// !!!不做任何检查!!!
-    fn split_internal(&mut self, pager: &mut Pager) -> Result<(Node, String, Node), Error> {
+    fn split_internal(&mut self, pager: &mut Pager, mut buffer: &Box<dyn Buffer>) -> Result<(Node, String, Node), Error> {
         let mut offset = INTERNAL_NODE_KEY_OFFSET;
         let num_key = self.page.get_value_from_offset(INTERNAL_NODE_NUM_KEY_OFFSET)?;
         let children = self.get_children()?;
         let split_node_num_key = num_key / 2;
-        let left_page = pager.get_new_page()?;
-        let right_page = pager.get_new_page()?;
+        let left_page = pager.get_new_page(buffer)?;
+        let right_page = pager.get_new_page(buffer)?;
         let mut left_node = Node::new(NodeType::Internal, self.parent_offset, left_page.page_num, false, left_page)?;
         let mut right_node = Node::new(NodeType::Internal, self.parent_offset, right_page.page_num, false, right_page)?;
 
@@ -500,11 +501,11 @@ impl Node {
 
     /// 分裂叶子节点
     /// !!!不做任何检查!!!
-    fn split_leaf(&mut self, pager: &mut Pager) -> Result<(Node, String, Node), Error> {
+    fn split_leaf(&mut self, pager: &mut Pager, mut buffer: &Box<dyn Buffer>) -> Result<(Node, String, Node), Error> {
         // 初始化新的左右叶子节点
         let mut kv_pairs = self.get_key_value_pairs()?;
-        let left_leaf_page = pager.get_new_page()?;
-        let right_leaf_page = pager.get_new_page()?;
+        let left_leaf_page = pager.get_new_page(buffer)?;
+        let right_leaf_page = pager.get_new_page(buffer)?;
         let mut left_leaf = Node::new(NodeType::Leaf, self.parent_offset, left_leaf_page.page_num, false, left_leaf_page)?;
         let mut right_leaf = Node::new(NodeType::Leaf, self.parent_offset, right_leaf_page.page_num, false, right_leaf_page)?;
 
@@ -523,7 +524,7 @@ impl Node {
 
 
     /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
-    pub(crate) fn split(&mut self, pager: &mut Pager) -> Result<bool, Error> {
+    pub(crate) fn split(&mut self, pager: &mut Pager, mut buffer: &Box<dyn Buffer>) -> Result<bool, Error> {
         if self.is_root {
 
             // 根节点不满足分裂要求
@@ -531,7 +532,7 @@ impl Node {
                 return Ok(false);
             }
 
-            let (left_node, median_key, right_node) = self.split_internal(pager)?;
+            let (left_node, median_key, right_node) = self.split_internal(pager, buffer)?;
 
             // 新的根节点只有两个儿子，分别是新左儿子、新右儿子
             self.page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, 2)?;
@@ -558,7 +559,7 @@ impl Node {
                 }
 
                 // 分裂当前节点
-                let (left_node, median_key, right_node) = self.split_internal(pager)?;
+                let (left_node, median_key, right_node) = self.split_internal(pager, buffer)?;
 
                 // 获取父节点
                 let parent_offset = self.parent_offset;
@@ -568,7 +569,7 @@ impl Node {
                         RwLock::new(
                             Node::try_from(
                                 NodeSpec {
-                                    page_data: pager.get_page(&page_num).unwrap().get_data(),
+                                    page_data: pager.get_page(&page_num, buffer).unwrap().get_data(),
                                     offset: parent_offset,
                                 }
                             )?
@@ -592,7 +593,7 @@ impl Node {
                 }
 
                 // 分裂当前节点
-                let (left_leaf, median_key, right_leaf) = self.split_leaf(pager)?;
+                let (left_leaf, median_key, right_leaf) = self.split_leaf(pager, buffer)?;
 
                 // 获取父节点
                 let parent_offset = self.parent_offset;
@@ -602,7 +603,7 @@ impl Node {
                         RwLock::new(
                             Node::try_from(
                                 NodeSpec {
-                                    page_data: pager.get_page(&page_num).unwrap().get_data(),
+                                    page_data: pager.get_page(&page_num, buffer).unwrap().get_data(),
                                     offset: parent_offset,
                                 }
                             )?

@@ -7,6 +7,7 @@ use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
 use std::borrow::BorrowMut;
+use crate::data_item::buffer::Buffer;
 
 /// B+树 配置
 pub const MAX_BRANCHING_FACTOR: usize = 200;
@@ -21,8 +22,8 @@ pub struct BTree {
 }
 
 impl BTree {
-    pub(crate) fn new(mut pager: Pager, file_name: String) -> Result<BTree, Error> {
-        let page = pager.get_new_page()?;
+    pub(crate) fn new(mut pager: Pager, file_name: String, mut buffer: &Box<dyn Buffer>) -> Result<BTree, Error> {
+        let page = pager.get_new_page(&buffer)?;
         let root =
             Arc::new(
                 RwLock::new(
@@ -44,8 +45,8 @@ impl BTree {
     }
 
     /// 在树上查询一个键
-    pub fn search(&mut self, key: String) -> Result<KeyValuePair, Error> {
-        let (_, kv) = self.search_node(Arc::clone(&self.root), &key, false)?;
+    pub fn search(&mut self, key: String, mut buffer: &Box<dyn Buffer>) -> Result<KeyValuePair, Error> {
+        let (_, kv) = self.search_node(Arc::clone(&self.root), &key, false, buffer)?;
         return match kv {
             Some(kv) => Ok(kv),
             None => Err(Error::KeyNotFound),
@@ -53,8 +54,8 @@ impl BTree {
     }
 
     /// 插入一个键值对，可能沿途分裂节点
-    pub fn insert(&mut self, kv: KeyValuePair) -> Result<(), Error> {
-        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, true)?;
+    pub fn insert(&mut self, kv: KeyValuePair, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, true, buffer)?;
         match kv_pair_exists {
             // 树中已经有键了
             Some(_) => return Err(Error::KeyAlreadyExists),
@@ -72,15 +73,15 @@ impl BTree {
             // 将对应页写入磁盘.
             return self
                 .pager.borrow_mut()
-                .write_page(Page::new(guarded_node.page.get_data(), &guarded_node.page.file_name, guarded_node.page.page_num));
+                .write_page(Page::new(guarded_node.page.get_data(), &guarded_node.page.file_name, guarded_node.page.page_num), buffer);
         }
-        self.split_node(Arc::clone(&node))
+        self.split_node(Arc::clone(&node), buffer)
     }
 
 
     /// 将key所对应的值更新为value
-    pub fn update(&mut self, kv: KeyValuePair) -> Result<(), Error> {
-        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, false)?;
+    pub fn update(&mut self, kv: KeyValuePair, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, false, buffer)?;
         match kv_pair_exists {
             None => return Err(Error::KeyNotFound),
             Some(_) => ()
@@ -93,8 +94,8 @@ impl BTree {
     }
 
     /// 查找并删除满足key的叶子节点
-    pub fn delete(&mut self, key: String) -> Result<(), Error> {
-        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &key, false)?;
+    pub fn delete(&mut self, key: String, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
+        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &key, false, buffer)?;
         match kv_pair_exists {
             None => return Err(Error::KeyNotFound),
             Some(_) => ()
@@ -117,6 +118,7 @@ impl BTree {
         node: Arc<RwLock<Node>>,
         search_key: &String,
         inserted: bool,
+        mut buffer: &Box<dyn Buffer>
     ) -> Result<(Arc<RwLock<Node>>, Option<KeyValuePair>), Error> {
 
         // 获取待查询子树的读权限
@@ -170,9 +172,9 @@ impl BTree {
                         let page_num = child_offset / PAGE_SIZE;
                         let child_node = Node::try_from(NodeSpec {
                             offset: *child_offset,
-                            page_data: self.pager.borrow_mut().get_page(&page_num)?.get_data(),
+                            page_data: self.pager.borrow_mut().get_page(&page_num, buffer)?.get_data(),
                         })?;
-                        return self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted);
+                        return self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted, buffer);
                     }
                     None => {
                         if inserted {
@@ -200,11 +202,11 @@ impl BTree {
                                     let page_num = child_offset / PAGE_SIZE;
                                     let child_node = Node::try_from(NodeSpec {
                                         offset: *child_offset,
-                                        page_data: pager.get_page(&page_num)?.get_data(),
+                                        page_data: pager.get_page(&page_num, buffer)?.get_data(),
                                     })?;
 
                                     // 查询最后一个儿子， 实际上这里会导致递归插入
-                                    self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted)
+                                    self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted, buffer)
                                 }
                                 None => Err(Error::UnexpectedError)
                             };
@@ -222,7 +224,7 @@ impl BTree {
 
     /// 沿当前节点向上检查所有的节点是否超过最大节点数
     /// 若超过，则分裂
-    fn split_node(&mut self, node: Arc<RwLock<Node>>) -> Result<(), Error> {
+    fn split_node(&mut self, node: Arc<RwLock<Node>>, mut buffer: &Box<dyn Buffer>) -> Result<(), Error> {
 
         // 获取写权限
         let mut guarded_node = match node.write() {
@@ -232,25 +234,25 @@ impl BTree {
 
         return if guarded_node.is_root {
             // 如果是根节点，直接分裂
-            guarded_node.split(&mut self.pager)?;
+            guarded_node.split(&mut self.pager, buffer)?;
             Ok(())
         } else {
             // 如果当前节点分裂，则父节点也可能需要分裂
-            if guarded_node.split(&mut self.pager)? {
+            if guarded_node.split(&mut self.pager, buffer)? {
                 let page_num = guarded_node.parent_offset / PAGE_SIZE;
                 let parent_node =
                     Arc::new(
                         RwLock::new(
                             Node::try_from(
                                 NodeSpec {
-                                    page_data: self.pager.get_page(&page_num).unwrap().get_data(),
+                                    page_data: self.pager.get_page(&page_num, buffer).unwrap().get_data(),
                                     offset: guarded_node.parent_offset,
                                 }
                             )?
                         )
                     );
                 // 递归分裂父节点
-                self.split_node(parent_node)?;
+                self.split_node(parent_node, buffer)?;
             }
             Ok(())
         };
@@ -260,17 +262,18 @@ impl BTree {
 #[cfg(test)]
 mod test {
     use crate::util::error::Error;
-    use crate::util::test_lib::{rm_test_file, gen_tree, gen_kv, gen_2_kv};
+    use crate::util::test_lib::{rm_test_file, gen_tree, gen_kv, gen_2_kv, gen_buffer};
     use crate::index::key_value_pair::KeyValuePair;
 
     #[test]
     fn test_search_empty_tree() -> Result<(), Error> {
         rm_test_file();
 
-        let mut tree = gen_tree()?;
+        let mut buffer = gen_buffer()?;
+        let mut tree = gen_tree(&buffer)?;
 
         let kv = gen_kv()?;
-        match tree.search(kv.key) {
+        match tree.search(kv.key, &buffer) {
             Err(Error::KeyNotFound) => (),
             _ => {
                 assert!(false);
@@ -285,18 +288,19 @@ mod test {
     fn test_insert_search_tree() -> Result<(), Error> {
         rm_test_file();
 
-        let mut tree = gen_tree()?;
+        let mut buffer = gen_buffer()?;
+        let mut tree = gen_tree(&buffer)?;
 
         let (kv1, kv2) = gen_2_kv()?;
 
-        tree.insert(kv1)?;
-        tree.insert(kv2)?;
+        tree.insert(kv1, &buffer)?;
+        tree.insert(kv2, &buffer)?;
 
-        let res1 = tree.search("Hello".to_string())?;
+        let res1 = tree.search("Hello".to_string(), &buffer)?;
         assert_eq!(res1.value, "World".to_string());
-        let res2 = tree.search("Test".to_string())?;
+        let res2 = tree.search("Test".to_string(), &buffer)?;
         assert_eq!(res2.value, "BTree".to_string());
-        match tree.search("not_exist".to_string()) {
+        match tree.search("not_exist".to_string(), &buffer) {
             Err(Error::KeyNotFound) => (),
             _ => {
                 assert!(false);
@@ -310,18 +314,20 @@ mod test {
     #[test]
     fn test_update() ->Result<(), Error> {
         rm_test_file();
-        let mut tree = gen_tree()?;
+
+        let mut buffer = gen_buffer()?;
+        let mut tree = gen_tree(&buffer)?;
 
         let (kv1, kv2) = gen_2_kv()?;
 
-        tree.insert(kv1.clone());
-        assert_eq!(tree.search(kv1.key.clone())?.value.trim(), kv1.value.trim());
+        tree.insert(kv1.clone(), &buffer);
+        assert_eq!(tree.search(kv1.key.clone(), &buffer)?.value.trim(), kv1.value.trim());
 
         let kv3 = KeyValuePair::new(kv1.key.clone(), kv2.value.clone());
-        tree.update(kv3);
+        tree.update(kv3, &buffer);
 
-        assert_ne!(tree.search(kv1.key.clone())?.value.trim(), kv1.value.trim());
-        assert_eq!(tree.search(kv1.key.clone())?.value.trim(), kv2.value.trim());
+        assert_ne!(tree.search(kv1.key.clone(), &buffer)?.value.trim(), kv1.value.trim());
+        assert_eq!(tree.search(kv1.key.clone(), &buffer)?.value.trim(), kv2.value.trim());
 
         rm_test_file();
         Ok(())
