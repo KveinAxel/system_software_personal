@@ -1,12 +1,13 @@
 use crate::data_item::buffer::Buffer;
-use crate::page::page_item::{Page};
+use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
 
 /// 每个 Pager 管理一个文件
 pub struct Pager {
     pub(crate) cnt: usize,
     max_size: usize,
-    file_name: String
+    file_name: String,
+    remain_size: Vec<(usize, usize)>
 }
 
 impl Clone for Pager {
@@ -14,7 +15,8 @@ impl Clone for Pager {
         Self {
             cnt: self.cnt,
             max_size: self.max_size,
-            file_name: self.file_name.clone()
+            file_name: self.file_name.clone(),
+            remain_size: self.remain_size.clone(),
         }
     }
 }
@@ -25,7 +27,8 @@ impl Pager {
             Pager {
                 cnt: 0,
                 max_size,
-                file_name
+                file_name,
+                remain_size: Vec::<(usize, usize)>::new(),
             }
         );
         pager.fill_up_to(&max_size, buffer)?;
@@ -53,16 +56,36 @@ impl Pager {
             self.fill_up_to(&(2 * self.max_size), buffer)?;
         }
         self.cnt += 1;
+        self.remain_size.push((PAGE_SIZE, 0));
         self.get_page(&self.cnt.clone(), buffer)
     }
 
     pub fn insert_value(&mut self, bytes: &[u8], buffer: &mut Box<dyn Buffer>) -> Result<usize, Error> {
-        // todo
-        unimplemented!()
+        let len = bytes.len();
+        for (i, (siz, offset)) in self.remain_size.clone().iter().enumerate() {
+            if *siz > len {
+                let mut page = self.get_page(&(i+1), buffer)?;
+                page.write_bytes_at_offset(bytes, *offset, len)?;
+                self.write_page(page, buffer)?;
+
+                let new_siz = *siz - len;
+                let new_offset = *offset + len;
+                self.remain_size[i] = (new_siz, new_offset);
+                return Ok(*offset + (self.cnt - 1) * PAGE_SIZE)
+            }
+        }
+
+        let mut page = self.get_new_page(buffer)?;
+        page.write_bytes_at_offset(bytes, 0, len)?;
+        self.remain_size[self.cnt - 1] = (PAGE_SIZE - len, len);
+        Ok((self.cnt - 1) * PAGE_SIZE)
     }
 
     pub fn get_value(&self, offset:usize, size: usize, buffer: &mut Box<dyn Buffer>) -> Result<Vec<u8>, Error> {
-        // todo
-        unimplemented!()
+        let page_num = offset / PAGE_SIZE + 1;
+        let page_offset = offset % PAGE_SIZE;
+
+        let page = self.get_page(&page_num, buffer)?;
+        Ok(page.get_ptr_from_offset(page_offset, size).to_vec())
     }
 }

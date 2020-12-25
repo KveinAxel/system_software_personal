@@ -2,23 +2,27 @@ use crate::table::field::{Field, FieldValue, FieldType};
 use crate::util::error::Error;
 use crate::table::entry::Entry;
 use crate::data_item::buffer::Buffer;
-use crate::index::key_value_pair::KeyValuePair;
+use crate::page::pager::Pager;
+use std::path::Path;
 
 pub struct Table {
     pub(crate) table_name: String,
-    fields: Vec<Field>,
+    pub(crate) fields: Vec<Field>,
+    pager: Box<Pager>
 }
 
 impl Table {
-    pub fn new(table_name: String) -> Table {
-        Table {
-            table_name,
+    pub fn new(table_name: String, buffer: &mut Box<dyn Buffer>) -> Result<Table, Error> {
+        buffer.add_file(Path::new(table_name.as_str()))?;
+        Ok(Table {
+            table_name: table_name.clone(),
             fields: Vec::<Field>::new(),
-        }
+            pager: Pager::new(table_name.clone(), 40, buffer)?,
+        })
     }
 
     pub fn insert(&mut self, entry: Entry, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
-        if self.fields.len() > entry.data.len() {
+        if self.fields.len() != entry.data.len() {
             return Err(Error::UnexpectedError)
         }
 
@@ -27,7 +31,7 @@ impl Table {
         }
 
         let primary_key = self.fields.get_mut(0).unwrap();
-        primary_key.insert(0, entry, buffer)
+        primary_key.insert(0, entry, &mut self.pager, buffer)
     }
 
     pub fn add_fields(&mut self, fields: Vec<Field>) {
@@ -63,7 +67,7 @@ impl Table {
 
     }
 
-    pub fn search_range(&self, key_index: usize, raw_left_value: Option<FieldValue>, raw_right_value: Option<FieldValue>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<Entry>, Error> {
+    pub fn search_range(&mut self, key_index: usize, raw_left_value: Option<FieldValue>, raw_right_value: Option<FieldValue>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<Entry>, Error> {
         if key_index > self.fields.len() {
             return Err(Error::UnexpectedError)
         }
@@ -87,7 +91,12 @@ impl Table {
             return Err(Error::IndexWithoutBTree)
         };
 
-        let res = field.search_range(raw_left_value, raw_right_value, buffer)?;
+        let siz = match field.field_type {
+            FieldType::INT32 => 4,
+            FieldType::FLOAT32 => 4,
+            FieldType::VARCHAR40 => 40,
+        };
+        let res = field.search_range(raw_left_value, raw_right_value, buffer, siz, &mut self.pager)?;
         let mut res_vec = Vec::<Entry>::new();
         for row in res {
             let res_slice = row.as_slice();
@@ -143,6 +152,7 @@ impl Clone for Table {
         Table {
             table_name: self.table_name.clone(),
             fields: fields.clone(),
+            pager: self.pager.clone()
         }
     }
 }

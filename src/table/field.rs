@@ -4,6 +4,7 @@ use crate::page::pager::Pager;
 use crate::data_item::buffer::Buffer;
 use crate::index::key_value_pair::KeyValuePair;
 use crate::table::entry::Entry;
+use std::path::Path;
 
 pub enum FieldType {
     INT32,
@@ -30,8 +31,8 @@ pub enum FieldValue {
 impl FieldValue {
     fn to_size(&self) -> usize {
         match self {
-            FieldValue::INT32(_data) => 32,
-            FieldValue::FLOAT32(_data) => 32,
+            FieldValue::INT32(_data) => 4,
+            FieldValue::FLOAT32(_data) => 4,
             FieldValue::VARCHAR40(_data) => 40,
         }
     }
@@ -163,7 +164,7 @@ impl Field {
             Some(_) => return Err(Error::IndexExist),
             None => ()
         }
-
+        buffer.add_file(Path::new(file_name.as_str()))?;
         let pager = Pager::new(
             file_name.clone(),
             40,
@@ -179,7 +180,7 @@ impl Field {
         Ok(())
     }
 
-    pub fn insert(&mut self, key_index: usize, entry: Entry, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn insert(&mut self, key_index: usize, entry: Entry, pager: &mut Box<Pager>, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         match &mut self.btree {
             Some(btree) => {
                 if key_index > entry.data.len() {
@@ -192,8 +193,12 @@ impl Field {
                     _ => return Err(Error::UnexpectedError)
                 }
                 let key: String = entry.data.get(key_index).unwrap().into();
-                let bytes = entry.to_bytes();
-                let offset = btree.pager.insert_value(bytes.as_slice(), buffer)?;
+                let mut bytes = Vec::<u8>::new();
+                for i in entry.data {
+                    let bs: Vec<u8> = i.into();
+                    bytes = [bytes, bs].concat()
+                }
+                let offset = pager.insert_value(bytes.as_slice(), buffer)?;
                 let kv = KeyValuePair::new(key, offset);
                 btree.insert(kv, buffer)
             }
@@ -222,10 +227,10 @@ impl Field {
         }
     }
 
-    pub fn search_range(&self, left: Option<FieldValue>, right: Option<FieldValue>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<Vec<u8>>, Error> {
+    pub fn search_range(&self, left: Option<FieldValue>, right: Option<FieldValue>, buffer: &mut Box<dyn Buffer>, sizz: usize, table_pager: &mut Box<Pager>) -> Result<Vec<Vec<u8>>, Error> {
         match &self.btree {
             Some(btree) => {
-                let mut siz = 32;
+                let mut siz = sizz;
                 let left_string = match left {
                     Some(left_value) => {
                         siz = left_value.to_size();
@@ -243,8 +248,8 @@ impl Field {
                 };
                 let res = btree.search_range(left_string, right_string, buffer)?;
                 let mut res_vec = Vec::<Vec<u8>>::new();
-                for (i, item) in res.iter().enumerate() {
-                    res_vec.push(btree.pager.get_value(item.value, siz, buffer)?);
+                for (_i, item) in res.iter().enumerate() {
+                    res_vec.push(table_pager.get_value(item.value, siz, buffer)?);
                 }
                 Ok(res_vec)
             }

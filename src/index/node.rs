@@ -128,10 +128,14 @@ impl Node {
 
                 page.write_value_at_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET, num_of_children)?;
                 page.write_value_at_offset(INTERNAL_NODE_NUM_KEY_OFFSET, num_of_key)?;
+                page.write_bytes_at_offset(&[is_root.to_byte()], IS_ROOT_OFFSET, IS_ROOT_SIZE)?;
+                page.write_bytes_at_offset(&[1u8], NODE_TYPE_OFFSET, NODE_TYPE_SIZE)?;
             }
             NodeType::Leaf => {
                 let num_of_pairs = page.get_value_from_offset(LEAF_NODE_NUM_PAIRS_OFFSET)?;
                 page.write_value_at_offset(LEAF_NODE_NUM_PAIRS_OFFSET, num_of_pairs)?;
+                page.write_bytes_at_offset(&[is_root.to_byte()], IS_ROOT_OFFSET, IS_ROOT_SIZE)?;
+                page.write_bytes_at_offset(&[2u8], NODE_TYPE_OFFSET, NODE_TYPE_SIZE)?;
             }
             _ => return Err(Error::UnexpectedError)
         }
@@ -538,22 +542,22 @@ impl Node {
         let right_leaf_page = pager.get_new_page(buffer)?;
         let mut left_leaf = Node::new(NodeType::Leaf, self.parent_offset, left_leaf_page.page_num, false, left_leaf_page)?;
         let mut right_leaf = Node::new(NodeType::Leaf, self.parent_offset, right_leaf_page.page_num, false, right_leaf_page)?;
-        left_leaf.add_next_node(right_leaf.offset);
+        left_leaf.add_next_node(right_leaf.offset)?;
         let previous_node_offset = self.page.get_value_from_offset(LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET)?;
-        left_leaf.add_previous_node(previous_node_offset);
+        left_leaf.add_previous_node(previous_node_offset)?;
 
-        right_leaf.add_previous_node(left_leaf.offset);
+        right_leaf.add_previous_node(left_leaf.offset)?;
         let next_node_offset = self.page.get_value_from_offset(LEAF_NODE_NEXT_NODE_PTR_OFFSET)?;
-        right_leaf.add_next_node(next_node_offset);
+        right_leaf.add_next_node(next_node_offset)?;
 
         if previous_node_offset != 0 {
             let mut previous_node = left_leaf.get_previous_node(pager, buffer)?;
-            previous_node.add_next_node(left_leaf.offset);
+            previous_node.add_next_node(left_leaf.offset)?;
         }
 
         if next_node_offset != 0 {
             let mut next_node = right_leaf.get_next_node(pager, buffer)?;
-            next_node.add_previous_node(right_leaf.offset);
+            next_node.add_previous_node(right_leaf.offset)?;
         }
 
         kv_pairs.sort();
@@ -571,12 +575,12 @@ impl Node {
 
 
     /// 将当前节点分裂成两个节点，并返回中介节点的键和两个节点
-    pub(crate) fn split(&mut self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<bool, Error> {
+    pub(crate) fn split(&mut self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<(bool, usize), Error> {
         if self.is_root {
 
             // 根节点不满足分裂要求
             if self.get_keys_len()? <= MAX_BRANCHING_FACTOR {
-                return Ok(false);
+                return Ok((false, 0));
             }
 
             let (left_node, median_key, right_node) = self.split_internal(pager, buffer)?;
@@ -593,7 +597,7 @@ impl Node {
             self.page.write_bytes_at_offset(median_key.as_bytes(), offset, KEY_SIZE)?;
 
             // 有分裂，返回true
-            return Ok(true);
+            return Ok((true, left_node.offset));
         }
 
         // 不是根节点的情况
@@ -602,7 +606,7 @@ impl Node {
 
                 // 是中间节点且不满足分裂条件
                 if self.get_keys_len()? < MAX_BRANCHING_FACTOR {
-                    return Ok(false);
+                    return Ok((false, 0));
                 }
 
                 // 分裂当前节点
@@ -630,13 +634,13 @@ impl Node {
                 parent_node.add_key_and_left_child(median_key, left_node.offset)?;
                 parent_node.update_internal_value(&self.offset, &right_node.offset)?;
                 // todo 释放当前节点
-                Ok(true)
+                Ok((true, left_node.offset))
             }
             NodeType::Leaf => {
 
                 // 是叶子节点，且不满足分裂条件
                 if self.get_key_value_pairs()?.len() < LEAF_NODE_MAX_KEY_VALUE_PAIRS {
-                    return Ok(false);
+                    return Ok((false, 0));
                 }
 
                 // 分裂当前节点
@@ -663,7 +667,7 @@ impl Node {
                 parent_node.add_key_and_left_child(median_key, left_leaf.offset)?;
                 parent_node.update_internal_value(&self.offset, &right_leaf.offset)?;
                 // todo 释放当前节点
-                Ok(true)
+                Ok((true, left_leaf.offset))
             }
             NodeType::Unknown => Err(Error::UnexpectedError),
         }

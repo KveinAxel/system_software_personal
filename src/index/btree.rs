@@ -7,7 +7,6 @@ use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;
-use crate::util::error::Error::UnexpectedError;
 
 /// B+树 配置
 pub const MAX_BRANCHING_FACTOR: usize = 200;
@@ -19,6 +18,7 @@ pub struct BTree {
     file_name: String,
     root: Arc<RwLock<Node>>,
     pub(crate) pager: Box<Pager>,
+    first_offset: usize,
 }
 
 impl Clone for BTree {
@@ -27,6 +27,7 @@ impl Clone for BTree {
             file_name: self.file_name.clone(),
             root: Arc::clone(&self.root),
             pager: self.pager.clone(),
+            first_offset: self.first_offset,
         }
     }
 }
@@ -34,13 +35,14 @@ impl Clone for BTree {
 impl BTree {
     pub(crate) fn new(mut pager: Box<Pager>, file_name: String, buffer: &mut Box<dyn Buffer>) -> Result<BTree, Error> {
         let page = pager.get_new_page(buffer)?;
+        let page_num = page.page_num;
         let root =
             Arc::new(
                 RwLock::new(
                     Node::new(
                         NodeType::Leaf,
                         0,
-                        page.page_num,
+                        page_num.clone(),
                         true,
                         page,
                     )?
@@ -51,6 +53,7 @@ impl BTree {
             file_name,
             pager,
             root,
+            first_offset: page_num.clone(),
         })
     }
 
@@ -87,7 +90,7 @@ impl BTree {
                     None => false
                 };
                 while next_node_offset != 0 {
-                    let page_num = next_node_offset / PAGE_SIZE;
+                    let page_num = next_node_offset;
                     let new_node =
                         Arc::new(
                             RwLock::new(
@@ -148,7 +151,7 @@ impl BTree {
                         let mut res = Vec::<KeyValuePair>::new();
                         let mut next_node_offset = read_node.offset;
                         while next_node_offset != 0 {
-                            let page_num = next_node_offset / PAGE_SIZE;
+                            let page_num = next_node_offset;
                             let new_node =
                                 Arc::new(
                                     RwLock::new(
@@ -171,7 +174,36 @@ impl BTree {
                         }
                         Ok(res)
                     }
-                    None => return Err(UnexpectedError)
+                    None => {
+                        let mut res = Vec::<KeyValuePair>::new();
+                        if self.first_offset == 0 {
+                            return Ok(res);
+                        }
+                        let mut next_node_offset = self.first_offset;
+                        while next_node_offset != 0 {
+                            let page_num = next_node_offset;
+                            let new_node =
+                                Arc::new(
+                                    RwLock::new(
+                                        Node::try_from(
+                                            NodeSpec {
+                                                page_data: self.pager.get_page(&page_num, buffer).unwrap().get_data(),
+                                                offset: next_node_offset,
+                                            }
+                                        )?
+                                    )
+                                );
+                            let read_node = match new_node.read() {
+                                Ok(rn ) => rn,
+                                _ => return Err(Error::UnexpectedError)
+                            };
+                            next_node_offset = read_node.page.get_value_from_offset(LEAF_NODE_NEXT_NODE_PTR_OFFSET)?;
+                            for i in read_node.get_key_value_pairs()? {
+                                res.push(i);
+                            }
+                        }
+                        Ok(res)
+                    }
                 }
             }
         }
@@ -431,11 +463,18 @@ impl BTree {
 
         return if guarded_node.is_root {
             // 如果是根节点，直接分裂
-            guarded_node.split(&mut self.pager, buffer)?;
+            let (is_split, offset) = guarded_node.split(&mut self.pager, buffer)?;
+            if guarded_node.offset == self.first_offset && is_split {
+                self.first_offset = offset;
+            }
             Ok(())
         } else {
             // 如果当前节点分裂，则父节点也可能需要分裂
-            if guarded_node.split(&mut self.pager, buffer)? {
+            let (is_split, offset) = guarded_node.split(&mut self.pager, buffer)?;
+            if is_split {
+                if guarded_node.offset == self.first_offset {
+                    self.first_offset = offset;
+                }
                 let page_num = guarded_node.parent_offset / PAGE_SIZE;
                 let parent_node =
                     Arc::new(
@@ -450,6 +489,7 @@ impl BTree {
                     );
                 // 递归分裂父节点
                 self.split_node(parent_node, buffer)?;
+
             }
             Ok(())
         };

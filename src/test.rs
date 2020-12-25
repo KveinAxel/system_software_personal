@@ -1,7 +1,7 @@
 pub mod test_buffer;
-mod test_btree;
-mod test_node;
-mod test_page_item;
-mod test_pager;
-mod test_field;
-mod test_table_manager;
+pub mod test_btree;
+pub mod test_node;
+pub mod test_page_item;
+pub mod test_pager;
+pub mod test_field;
+pub mod test_table_manager;

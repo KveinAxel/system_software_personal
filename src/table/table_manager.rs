@@ -3,10 +3,10 @@ use crate::table::table_item::Table;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;
 use crate::table::entry::Entry;
-use crate::table::field::{Field, FieldValue};
+use crate::table::field::{Field};
 
 pub struct TableManager {
-    table_cache: HashMap<String, Table>,
+    pub(crate) table_cache: HashMap<String, Table>,
     buffer: Box<dyn Buffer>
 }
 
@@ -27,7 +27,7 @@ impl TableManager {
     }
 
     pub fn insert(&mut self, table_name: String, entry: Entry) -> Result<(), Error> {
-        let raw_table = self.table_cache.get_mut(table_name.as_str());
+        let raw_table = self.table_cache.get_mut(&table_name);
         match raw_table {
             Some(table) => {
                 table.insert(entry, &mut self.buffer)
@@ -43,9 +43,18 @@ impl TableManager {
             None => ()
         };
 
-        let mut table = Table::new(table_name);
+        let mut table = Table::new(table_name, &mut self.buffer)?;
         table.add_fields(fields);
         self.table_cache.insert(table.table_name.clone(), table);
         Ok(())
+    }
+
+    pub fn create_index(&mut self, table_name: String, key_index: usize) -> Result<(), Error> {
+        let raw_table = self.table_cache.get_mut(table_name.as_str());
+        let table = match raw_table {
+            Some(table) => table,
+            None => return Err(Error::TableNotFound)
+        };
+        table.create_index(key_index, &mut self.buffer)
     }
 }
