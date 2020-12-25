@@ -1,7 +1,6 @@
 use crate::data_item::buffer::Buffer;
 use crate::page::page_item::{Page};
 use crate::util::error::Error;
-use uuid::Uuid;
 
 /// 每个 Pager 管理一个文件
 pub struct Pager {
@@ -22,7 +21,7 @@ impl Clone for Pager {
 
 impl Pager {
     pub fn new(file_name: String, max_size: usize, buffer: &mut Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
-        let mut pager = Box::new(
+        let pager = Box::new(
             Pager {
                 cnt: 0,
                 max_size,

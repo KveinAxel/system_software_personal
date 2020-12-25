@@ -351,7 +351,7 @@ mod test {
         rm_test_file();
 
         let mut buffer = gen_buffer()?;
-        let mut tree = gen_tree(&mut buffer)?;
+        let tree = gen_tree(&mut buffer)?;
 
         let kv = gen_kv()?;
         match tree.search(kv.key, &mut buffer) {

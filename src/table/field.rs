@@ -111,7 +111,7 @@ impl From<FieldValue> for Vec<u8> {
 pub struct Field {
     table: Weak<Table>,
     field_name: String,
-    field_type: FieldType,
+    pub(crate) field_type: FieldType,
     btree: Option<BTree>,
 }
 
@@ -128,7 +128,7 @@ impl Clone for Field {
 
 impl Field {
 
-    fn parse_self(&self, bytes: &[u8], offset: usize) -> Result<(FieldValue, usize), Error> {
+    pub fn parse_self(&self, bytes: &[u8], offset: usize) -> Result<(FieldValue, usize), Error> {
         match self.field_type {
             FieldType::INT32 => {
                 let mut i32_data: [u8; 4] = [0; 4];
