@@ -2,6 +2,7 @@ use crate::table::field::{Field, FieldValue, FieldType};
 use crate::util::error::Error;
 use crate::table::entry::Entry;
 use crate::data_item::buffer::Buffer;
+use crate::index::key_value_pair::KeyValuePair;
 
 pub struct Table {
     pub(crate) table_name: String,
@@ -10,7 +11,6 @@ pub struct Table {
 
 impl Table {
     pub fn new(table_name: String) -> Table {
-
         Table {
             table_name,
             fields: Vec::<Field>::new(),
@@ -63,6 +63,11 @@ impl Table {
 
     }
 
+    pub fn search_range(&self, key_index: usize, left_value: Option<FieldValue>, right_value: Option<FieldValue>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<Entry>, Error> {
+        unimplemented!()
+        // todo
+    }
+
     fn check_field(field: &Field, fv: &FieldValue) -> Result<(), Error> {
         match (&field.field_type, fv) {
             (FieldType::INT32, FieldValue::INT32(_)) => Ok(()),
@@ -79,9 +84,15 @@ impl Table {
         }
     }
 
-    // pub create_index() {
-    //
-    // }
+    pub fn create_index(&mut self, key_index: usize, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
+        if self.fields.len() <= key_index {
+            return Err(Error::UnexpectedError)
+        }
+
+        let k = self.fields.get_mut(key_index).unwrap();
+        let file_name = k.field_name.clone() + ".idx";
+        k.create_btree(file_name, buffer)
+    }
 }
 
 impl Clone for Table {

@@ -13,7 +13,8 @@ pub enum Error {
     FieldValueTooLong,
     FieldValueNotCompatible,
     IndexWithoutBTree,
-    VarcharTooLong
+    VarcharTooLong,
+    IndexExist,
 }
 
 impl std::convert::From<std::io::Error> for Error {

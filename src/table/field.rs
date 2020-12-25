@@ -107,7 +107,7 @@ impl From<FieldValue> for Vec<u8> {
 }
 
 pub struct Field {
-    field_name: String,
+    pub(crate) field_name: String,
     pub(crate) field_type: FieldType,
     btree: Option<BTree>,
 }
@@ -159,6 +159,11 @@ impl Field {
     }
 
     pub fn create_btree(&mut self, file_name: String, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
+        match &self.btree {
+            Some(_) => return Err(Error::IndexExist),
+            None => ()
+        }
+
         let pager = Pager::new(
             file_name.clone(),
             40,

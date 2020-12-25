@@ -1,31 +1,27 @@
 use std::collections::HashMap;
-use crate::page::pager::Pager;
 use crate::table::table_item::Table;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;
 use crate::table::entry::Entry;
+use crate::table::field::{Field, FieldValue};
 
 pub struct TableManager {
-    pager: Pager,
     table_cache: HashMap<String, Table>,
     buffer: Box<dyn Buffer>
 }
 
 impl TableManager {
-    pub fn new(pager: Pager, buffer: Box<dyn Buffer>) -> TableManager {
+    pub fn new(buffer: Box<dyn Buffer>) -> TableManager {
         TableManager {
-            pager,
             table_cache: HashMap::<String, Table>::new(),
             buffer
         }
     }
 
-    pub fn read_full_table(&self, table_name: String) -> Result<Table, Error> {
-        let raw_table = self.table_cache.get(table_name.as_str());
+    pub fn read_full_table(&mut self, table_name: String) -> Result<Vec<Entry>, Error> {
+        let raw_table = self.table_cache.get_mut(table_name.as_str());
         match raw_table {
-            Some(table) => {
-                Ok(table.clone())
-            }
+            Some(table) => Ok(table.search_range(0, None, None, &mut self.buffer)?),
             None => Err(Error::TableNotFound)
         }
     }
@@ -40,16 +36,16 @@ impl TableManager {
         }
     }
 
-    pub fn create_table(&mut self, table_to_create: Table) -> Result<(), Error> {
-        // let raw_table = self.table_cache.get(table_to_create.table_name.as_str());
-        // match raw_table {
-        //     Some(_table) => return Err(Error::TableAlreadyExists),
-        //     None => ()
-        // };
-        //
-        // let table = Table::new(self, uuid, table_to_create)?;
-        // self.update_first_uuid(table.self_uuid)?;
-        // self.table_cache.insert(table.table_name.clone(), table.clone());
+    pub fn create_table(&mut self, table_name: String, fields: Vec<Field>) -> Result<(), Error> {
+        let raw_table = self.table_cache.get(table_name.as_str());
+        match raw_table {
+            Some(_table) => return Err(Error::TableAlreadyExists),
+            None => ()
+        };
+
+        let mut table = Table::new(table_name);
+        table.add_fields(fields);
+        self.table_cache.insert(table.table_name.clone(), table);
         Ok(())
     }
 }
