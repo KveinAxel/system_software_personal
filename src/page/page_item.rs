@@ -122,12 +122,3 @@ impl TryFrom<&[u8]> for Value {
         Ok(Value(usize::from_be_bytes(truncated_arr)))
     }
 }
-
-#[cfg(test)]
-mod test {
-
-    #[test]
-    fn test_needed_here() {
-        // todo
-    }
-}

@@ -1,5 +1,3 @@
-use crate::table::table_item::Table;
-use std::rc::{Weak, Rc};
 use crate::index::btree::BTree;
 use crate::util::error::Error;
 use crate::page::pager::Pager;
@@ -109,7 +107,6 @@ impl From<FieldValue> for Vec<u8> {
 }
 
 pub struct Field {
-    table: Weak<Table>,
     field_name: String,
     pub(crate) field_type: FieldType,
     btree: Option<BTree>,
@@ -118,7 +115,6 @@ pub struct Field {
 impl Clone for Field {
     fn clone(&self) -> Self {
         Self {
-            table: self.table.clone(),
             field_name: self.field_name.clone(),
             field_type: self.field_type.clone(),
             btree: self.btree.clone(),
@@ -154,9 +150,8 @@ impl Field {
         }
     }
 
-    pub fn create_field(table: Rc<Table>, field_name: String, field_type: FieldType) -> Result<Field, Error> {
+    pub fn create_field(field_name: String, field_type: FieldType) -> Result<Field, Error> {
         Ok(Field {
-            table: Rc::downgrade(&table),
             field_name,
             field_type,
             btree: None,
@@ -227,43 +222,5 @@ impl Field {
             Some(_) => true,
             None => false
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::util::error::Error;
-    use crate::util::test_lib::rm_test_file;
-
-    #[test]
-    fn test_create_field() -> Result<(), Error> {
-        rm_test_file();
-
-        rm_test_file();
-        Ok(())
-    }
-
-    #[test]
-    fn test_parse_field() -> Result<(), Error> {
-        rm_test_file();
-
-        rm_test_file();
-        Ok(())
-    }
-
-    #[test]
-    fn test_insert() -> Result<(), Error> {
-        rm_test_file();
-
-        rm_test_file();
-        Ok(())
-    }
-
-    #[test]
-    fn test_search() -> Result<(), Error> {
-        rm_test_file();
-
-        rm_test_file();
-        Ok(())
     }
 }
