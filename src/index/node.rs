@@ -20,11 +20,13 @@ const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_PO
 
 /// 叶子节点的头格式 (共计 18 个字节)
 ///
-/// 键值对的空间: PAGE_SIZE - LEAF_NODE_HEADER_SIZE = 4096 - 18 = 4076 字节.
-/// 其中叶子能够存储 4076 / keys_limit = 20 (10 个键和 10 个值).
+/// 键值对的空间: PAGE_SIZE - LEAF_NODE_HEADER_SIZE = 4096 - 34 = 4062 字节.
+/// 其中叶子能够存储 4062 / keys_limit = 20 (10 个键和 10 个值).
 const LEAF_NODE_NUM_PAIRS_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
 const LEAF_NODE_NUM_PAIRS_SIZE: usize = PTR_SIZE;
-pub(crate) const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_PAIRS_SIZE;
+const LEAF_NODE_NEXT_NODE_PTR_OFFSET: usize = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_PAIRS_SIZE;
+const LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET: usize = LEAF_NODE_NEXT_NODE_PTR_OFFSET + PTR_SIZE;
+pub(crate) const LEAF_NODE_HEADER_SIZE: usize = LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET + PTR_SIZE;
 const LEAF_NODE_MAX_KEY_VALUE_PAIRS: usize = 10;
 
 /// 内部节点的头格式 (共计 26 个字节)
@@ -494,6 +496,39 @@ impl Node {
         Ok((left_node, median_key.trim_matches(char::from(0)).to_string(), right_node))
     }
 
+    pub fn add_next_node(&mut self, offset: usize) -> Result<(), Error> {
+        self.page.write_value_at_offset(LEAF_NODE_NEXT_NODE_PTR_OFFSET, offset)
+    }
+
+    pub fn get_next_node(&self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<Node, Error> {
+        let offset = self.page.get_value_from_offset(LEAF_NODE_NEXT_NODE_PTR_OFFSET)?;
+        let page_num = offset / PAGE_SIZE;
+        let next_node = Node::try_from(
+            NodeSpec {
+                page_data: pager.get_page(&page_num, buffer).unwrap().get_data(),
+                offset,
+            }
+        )?;
+        Ok(next_node)
+    }
+
+    pub fn add_previous_node(&mut self, offset: usize) -> Result<(), Error> {
+        self.page.write_value_at_offset(LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET, offset)
+    }
+
+    pub fn get_previous_node(&self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<Node, Error> {
+        let offset = self.page.get_value_from_offset(LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET)?;
+        let page_num = offset / PAGE_SIZE;
+        let previous_node = Node::try_from(
+            NodeSpec {
+                page_data: pager.get_page(&page_num, buffer).unwrap().get_data(),
+                offset,
+            }
+        )?;
+        Ok(previous_node)
+    }
+
+
     /// 分裂叶子节点
     /// !!!不做任何检查!!!
     fn split_leaf(&mut self, pager: &mut Pager, buffer: &mut Box<dyn Buffer>) -> Result<(Node, String, Node), Error> {
@@ -503,6 +538,23 @@ impl Node {
         let right_leaf_page = pager.get_new_page(buffer)?;
         let mut left_leaf = Node::new(NodeType::Leaf, self.parent_offset, left_leaf_page.page_num, false, left_leaf_page)?;
         let mut right_leaf = Node::new(NodeType::Leaf, self.parent_offset, right_leaf_page.page_num, false, right_leaf_page)?;
+        left_leaf.add_next_node(right_leaf.offset);
+        let previous_node_offset = self.page.get_value_from_offset(LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET)?;
+        left_leaf.add_previous_node(previous_node_offset);
+
+        right_leaf.add_previous_node(left_leaf.offset);
+        let next_node_offset = self.page.get_value_from_offset(LEAF_NODE_NEXT_NODE_PTR_OFFSET)?;
+        right_leaf.add_next_node(next_node_offset);
+
+        if previous_node_offset != 0 {
+            let mut previous_node = left_leaf.get_previous_node(pager, buffer)?;
+            previous_node.add_next_node(left_leaf.offset);
+        }
+
+        if next_node_offset != 0 {
+            let mut next_node = right_leaf.get_next_node(pager, buffer)?;
+            next_node.add_previous_node(right_leaf.offset);
+        }
 
         kv_pairs.sort();
         let mid = kv_pairs.len() / 2;
