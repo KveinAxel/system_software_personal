@@ -54,8 +54,8 @@ impl BTree {
     }
 
     /// 在树上查询一个键
-    pub fn search(&mut self, key: String, buffer: &mut Box<dyn Buffer>) -> Result<KeyValuePair, Error> {
-        let (_, kv) = self.search_node(Arc::clone(&self.root), &key, false, buffer)?;
+    pub fn search(&self, key: String, buffer: &mut Box<dyn Buffer>) -> Result<KeyValuePair, Error> {
+        let (_, kv) = self.search_node(Arc::clone(&self.root), &key, buffer)?;
         return match kv {
             Some(kv) => Ok(kv),
             None => Err(Error::KeyNotFound),
@@ -64,7 +64,7 @@ impl BTree {
 
     /// 插入一个键值对，可能沿途分裂节点
     pub fn insert(&mut self, kv: KeyValuePair, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
-        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, true, buffer)?;
+        let (node, kv_pair_exists) = self.search_node_inserted(Arc::clone(&self.root), &kv.key, buffer)?;
         match kv_pair_exists {
             // 树中已经有键了
             Some(_) => return Err(Error::KeyAlreadyExists),
@@ -90,7 +90,7 @@ impl BTree {
 
     /// 将key所对应的值更新为value
     pub fn update(&mut self, kv: KeyValuePair, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
-        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, false, buffer)?;
+        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &kv.key, buffer)?;
         match kv_pair_exists {
             None => return Err(Error::KeyNotFound),
             Some(_) => ()
@@ -104,7 +104,7 @@ impl BTree {
 
     /// 查找并删除满足key的叶子节点
     pub fn delete(&mut self, key: String, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
-        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &key, false, buffer)?;
+        let (node, kv_pair_exists) = self.search_node(Arc::clone(&self.root), &key, buffer)?;
         match kv_pair_exists {
             None => return Err(Error::KeyNotFound),
             Some(_) => ()
@@ -123,11 +123,10 @@ impl BTree {
     /// 否则，继续递归或者返回合适的错误
     /// inserted字段控制在找不到合适节点时是否插入新节点并返回
     fn search_node(
-        &mut self,
+        &self,
         node: Arc<RwLock<Node>>,
         search_key: &String,
-        inserted: bool,
-        buffer: &mut Box<dyn Buffer>
+        buffer: &mut Box<dyn Buffer>,
     ) -> Result<(Arc<RwLock<Node>>, Option<KeyValuePair>), Error> {
 
         // 获取待查询子树的读权限
@@ -181,46 +180,119 @@ impl BTree {
                         let page_num = child_offset / PAGE_SIZE;
                         let child_node = Node::try_from(NodeSpec {
                             offset: *child_offset,
+                            page_data: self.pager.get_page(&page_num, buffer)?.get_data(),
+                        })?;
+                        return self.search_node(Arc::new(RwLock::new(child_node)), search_key, buffer);
+                    }
+                    None => Err(Error::KeyNotFound)
+                }
+            }
+            NodeType::Unknown => {
+                Err(Error::UnexpectedError)
+            }
+        }
+    }
+
+    /// search_node 以当前节点为根的子树递归查询一个键
+    /// 使用 pager 来获取页来遍历子树
+    /// 如果遍历了所有的叶子节点，还没有找到对应的键
+    /// 返回叶子节点和空来表示没找到
+    /// 否则，继续递归或者返回合适的错误
+    /// inserted字段控制在找不到合适节点时是否插入新节点并返回
+    fn search_node_inserted(
+        &mut self,
+        node: Arc<RwLock<Node>>,
+        search_key: &String,
+        buffer: &mut Box<dyn Buffer>,
+    ) -> Result<(Arc<RwLock<Node>>, Option<KeyValuePair>), Error> {
+
+        // 获取待查询子树的读权限
+        let guarded_node = match node.read() {
+            Err(_) => return Err(Error::UnexpectedError),
+            Ok(node) => node,
+        };
+
+        // 分派节点类型
+        match guarded_node.node_type {
+
+            // 对于叶子节点
+            // 获取叶子的所有的键
+            // 然后匹配这些键
+            NodeType::Leaf => {
+                let keys = guarded_node.get_keys()?;
+                for (i, key) in keys.iter().enumerate() {
+                    if *key == *search_key {
+                        let kv_pairs = guarded_node.get_key_value_pairs()?;
+                        return match kv_pairs.get(i) {
+                            None => Ok((Arc::clone(&node), None)),
+                            Some(kv) => Ok((Arc::clone(&node), Some(kv.clone()))),
+                        };
+                    }
+                }
+                Ok((Arc::clone(&node), None))
+            }
+
+            // 对于中间节点
+            // 获取节点所有的键
+            // 找到第一个比待查询键大的键
+            // 若找到，获取键左边的儿子，并递归查询
+            // 若找不到，且需要插入，则扩大最后一个键，并递归插入
+            NodeType::Internal => {
+                let keys = guarded_node.get_keys()?;
+                let mut index: Option<usize> = None;
+                for (i, key) in keys.iter().enumerate() {
+                    if *search_key <= *key {
+                        index = Some(i);
+                        break;
+                    }
+                };
+
+                return match index {
+                    Some(i) => {
+                        let children_ptrs = guarded_node.get_children()?;
+                        let child_offset = match children_ptrs.get(i) {
+                            None => return Err(Error::UnexpectedError),
+                            Some(child_offset) => child_offset,
+                        };
+                        let page_num = child_offset / PAGE_SIZE;
+                        let child_node = Node::try_from(NodeSpec {
+                            offset: *child_offset,
                             page_data: self.pager.as_mut().get_page(&page_num, buffer)?.get_data(),
                         })?;
-                        return self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted, buffer);
+                        self.search_node_inserted(Arc::new(RwLock::new(child_node)), search_key, buffer)
                     }
                     None => {
-                        if inserted {
-                            // 获取最后一个键用于插入
-                            let last_key = keys.last();
+                        // 获取最后一个键用于插入
+                        let last_key = keys.last();
 
-                            return match last_key {
-                                Some(last_key) => {
-                                    //获取写权限
-                                    let mut write_node = match node.write() {
-                                        Err(_) => return Err(Error::UnexpectedError),
-                                        Ok(node) => node
-                                    };
+                        match last_key {
+                            Some(last_key) => {
+                                //获取写权限
+                                let mut write_node = match node.write() {
+                                    Err(_) => return Err(Error::UnexpectedError),
+                                    Ok(node) => node
+                                };
 
-                                    // 更新最后一个键
-                                    write_node.update_internal_key(last_key, search_key)?;
+                                // 更新最后一个键
+                                write_node.update_internal_key(last_key, search_key)?;
 
-                                    // 获取最后一个儿子
-                                    let children_ptrs = write_node.get_children()?;
-                                    let child_offset = match children_ptrs.last() {
-                                        None => return Err(Error::UnexpectedError),
-                                        Some(child_offset) => child_offset,
-                                    };
-                                    let pager = self.pager.as_mut();
-                                    let page_num = child_offset / PAGE_SIZE;
-                                    let child_node = Node::try_from(NodeSpec {
-                                        offset: *child_offset,
-                                        page_data: pager.get_page(&page_num, buffer)?.get_data(),
-                                    })?;
+                                // 获取最后一个儿子
+                                let children_ptrs = write_node.get_children()?;
+                                let child_offset = match children_ptrs.last() {
+                                    None => return Err(Error::UnexpectedError),
+                                    Some(child_offset) => child_offset,
+                                };
+                                let pager = self.pager.as_mut();
+                                let page_num = child_offset / PAGE_SIZE;
+                                let child_node = Node::try_from(NodeSpec {
+                                    offset: *child_offset,
+                                    page_data: pager.get_page(&page_num, buffer)?.get_data(),
+                                })?;
 
-                                    // 查询最后一个儿子， 实际上这里会导致递归插入
-                                    self.search_node(Arc::new(RwLock::new(child_node)), search_key, inserted, buffer)
-                                }
-                                None => Err(Error::UnexpectedError)
-                            };
-                        } else {
-                            Err(Error::KeyNotFound)
+                                // 查询最后一个儿子， 实际上这里会导致递归插入
+                                self.search_node_inserted(Arc::new(RwLock::new(child_node)), search_key, buffer)
+                            }
+                            None => Err(Error::UnexpectedError)
                         }
                     }
                 }
@@ -273,7 +345,6 @@ mod test {
     use crate::util::error::Error;
     use crate::util::test_lib::{rm_test_file, gen_tree, gen_kv, gen_2_kv, gen_buffer};
     use crate::index::key_value_pair::KeyValuePair;
-    use std::path::Path;
 
     #[test]
     fn test_search_empty_tree() -> Result<(), Error> {
@@ -307,9 +378,9 @@ mod test {
         tree.insert(kv2, &mut buffer)?;
 
         let res1 = tree.search("Hello".to_string(), &mut buffer)?;
-        assert_eq!(res1.value, "World".to_string());
+        assert_eq!(res1.value, 4096usize);
         let res2 = tree.search("Test".to_string(), &mut buffer)?;
-        assert_eq!(res2.value, "BTree".to_string());
+        assert_eq!(res2.value, 4096 * 2usize);
         match tree.search("not_exist".to_string(), &mut buffer) {
             Err(Error::KeyNotFound) => (),
             _ => {
@@ -322,7 +393,7 @@ mod test {
     }
 
     #[test]
-    fn test_update() ->Result<(), Error> {
+    fn test_update() -> Result<(), Error> {
         rm_test_file();
 
         let mut buffer = gen_buffer()?;
@@ -331,13 +402,13 @@ mod test {
         let (kv1, kv2) = gen_2_kv()?;
 
         tree.insert(kv1.clone(), &mut buffer)?;
-        assert_eq!(tree.search(kv1.key.clone(), &mut buffer)?.value.trim(), kv1.value.trim());
+        assert_eq!(tree.search(kv1.key.clone(), &mut buffer)?.value, kv1.value);
 
         let kv3 = KeyValuePair::new(kv1.key.clone(), kv2.value.clone());
         tree.update(kv3, &mut buffer)?;
 
-        assert_ne!(tree.search(kv1.key.clone(), &mut buffer)?.value.trim(), kv1.value.trim());
-        assert_eq!(tree.search(kv1.key.clone(), &mut buffer)?.value.trim(), kv2.value.trim());
+        assert_ne!(tree.search(kv1.key.clone(), &mut buffer)?.value, kv1.value);
+        assert_eq!(tree.search(kv1.key.clone(), &mut buffer)?.value, kv2.value);
 
         rm_test_file();
         Ok(())

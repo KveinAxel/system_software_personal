@@ -1,10 +1,10 @@
 use std::rc::{Weak};
 
-use uuid::Uuid;
-
-use crate::table::field::Field;
+use crate::table::field::{Field, FieldValue};
 use crate::table::table_manager::TableManager;
 use crate::util::error::Error;
+use crate::table::entry::Entry;
+use crate::data_item::buffer::Buffer;
 
 pub enum Status {
     NORMAL = 1,
@@ -21,37 +21,48 @@ impl Clone for Status {
 pub struct Table {
     table_manager: Weak<TableManager>,
     pub(crate) table_name: String,
-    pub(crate) next_table: Uuid,
-    pub(crate) self_uuid: Uuid,
     status: Status,
     fields: Vec<Field>,
 }
 
 impl Table {
-    pub fn new_orphan_table(table_manager: Weak<TableManager>, table_name: String) -> Table {
+    pub fn new(table_manager: Weak<TableManager>, table_name: String) -> Table {
         Table {
             table_manager,
             table_name,
-            next_table: Uuid::nil(),
-            self_uuid: Uuid::nil(),
             status: Status::NORMAL,
             fields: Vec::<Field>::new(),
         }
     }
 
-    /// todo
-    pub fn load_table(tbm: &TableManager, uuid: Uuid) -> Result<Box<Table>, Error> {
-        Err(Error::UnexpectedError)
+    pub fn insert(&mut self, entry: Entry, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
+        let primary_key = self.fields.get_mut(0).unwrap();
+
+        // todo check field
+
+        primary_key.insert(0, entry, buffer)
     }
 
-    /// todo
-    pub fn insert(&mut self, field: Field) -> Result<(), Error> {
-        Err(Error::UnexpectedError)
+    pub fn add_fields(&mut self, fields: Vec<Field>) {
+        self.fields = [self.fields.clone(), fields].concat();
     }
 
-    /// todo
-    pub fn create_table(tbm: &TableManager, uuid: Uuid, table: Table) -> Result<Table, Error> {
+    pub fn search(&self, key_index: usize, fv: FieldValue, buffer: &mut Box<dyn Buffer>) -> Result<Entry, Error> {
+        // todo check field
+        if key_index > self.fields.len() {
+            return Err(Error::UnexpectedError)
+        }
+
+        let field = if self.fields.get(key_index).unwrap().is_indexed() {
+            self.fields.get(key_index).unwrap()
+        } else {
+            self.fields.get(0).unwrap()
+        };
+        let res = field.search(fv, buffer)?;
+        // todo 解析
+
         Err(Error::UnexpectedError)
+
     }
 }
 
@@ -64,10 +75,8 @@ impl Clone for Table {
         Table {
             table_manager: self.table_manager.clone(),
             table_name: self.table_name.clone(),
-            next_table: self.next_table.clone(),
-            self_uuid: self.self_uuid.clone(),
             status: self.status.clone(),
-            fields,
+            fields: fields.clone(),
         }
     }
 }

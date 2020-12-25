@@ -3,11 +3,11 @@ use std::cmp::Ordering;
 #[derive(Eq, PartialOrd, PartialEq)]
 pub struct KeyValuePair {
     pub key: String,
-    pub value: String,
+    pub value: usize,
 }
 
 impl KeyValuePair {
-    pub fn new(key: String, value: String) -> KeyValuePair {
+    pub fn new(key: String, value: usize) -> KeyValuePair {
         KeyValuePair { key, value }
     }
 }

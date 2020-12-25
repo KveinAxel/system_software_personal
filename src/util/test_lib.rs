@@ -35,9 +35,11 @@ pub fn gen_tree(buffer: &mut Box<dyn Buffer>) -> Result<BTree, Error> {
 }
 
 pub fn gen_2_kv() -> Result<(KeyValuePair, KeyValuePair), Error> {
-    Ok((KeyValuePair::new("Hello".to_string(), "World".to_string()), KeyValuePair::new("Test".to_string(), "BTree".to_string())))
+    let value1= 4096usize;
+    let value2 = 4096*2usize;
+    Ok((KeyValuePair::new("Hello".to_string(), value1), KeyValuePair::new("Test".to_string(), value2)))
 }
 
-pub fn gen_kv () -> Result<KeyValuePair, Error> {
-    Ok(KeyValuePair::new("Hello".to_string(), "World".to_string()))
+pub fn gen_kv() -> Result<KeyValuePair, Error> {
+    Ok(KeyValuePair::new("Hello".to_string(), 4096usize))
 }

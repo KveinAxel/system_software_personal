@@ -54,7 +54,7 @@ const MAX_SPACE_FOR_KEYS: usize = PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE - MAX_SP
 
 /// 键和值的大小
 const KEY_SIZE: usize = 10;
-const VALUE_SIZE: usize = 10;
+const VALUE_SIZE: usize = PTR_SIZE;
 
 #[derive(PartialEq)]
 pub enum NodeType {
@@ -161,17 +161,13 @@ impl Node {
                     };
                     offset += KEY_SIZE;
 
-                    let value_raw = self.page.get_ptr_from_offset(offset, VALUE_SIZE);
-                    let value = match str::from_utf8(value_raw) {
-                        Ok(val) => val,
-                        Err(_) => return Err(Error::UTF8Error),
-                    };
+                    let value = self.page.get_value_from_offset(offset)?;
                     offset += VALUE_SIZE;
 
                     // 去除首位0字符
                     res.push(KeyValuePair::new(
                         key.trim_matches(char::from(0)).to_string(),
-                        value.trim_matches(char::from(0)).to_string(),
+                        value.clone(),
                     ))
                 }
                 Ok(res)
@@ -256,8 +252,8 @@ impl Node {
                 // 写入键值对
                 let key_raw = kv.key.as_bytes();
                 self.page.write_bytes_at_offset(key_raw, offset, KEY_SIZE)?;
-                let value_raw = kv.value.as_bytes();
-                self.page.write_bytes_at_offset(value_raw, offset + KEY_SIZE, VALUE_SIZE)?;
+                let value_raw = kv.value.to_be_bytes();
+                self.page.write_bytes_at_offset(&value_raw, offset + KEY_SIZE, VALUE_SIZE)?;
                 Ok(())
             }
             _ => return Err(Error::UnexpectedError),
@@ -378,13 +374,12 @@ impl Node {
     }
 
     /// 将内部节点的指定offset更新成新的offset
-    fn update_internal_value(&mut self, old_node_offset: &usize, new_node_offset: &usize) -> Result<(), Error>{
+    fn update_internal_value(&mut self, old_node_offset: &usize, new_node_offset: &usize) -> Result<(), Error> {
         match self.node_type {
             NodeType::Internal => {
-
                 for (i, offset) in self.get_children()?.iter().enumerate() {
                     if *offset == *old_node_offset {
-                        return self.page.write_value_at_offset(INTERNAL_NODE_CHILDREN_OFFSET + i * PTR_SIZE, *new_node_offset)
+                        return self.page.write_value_at_offset(INTERNAL_NODE_CHILDREN_OFFSET + i * PTR_SIZE, *new_node_offset);
                     }
                 }
 
@@ -411,8 +406,8 @@ impl Node {
                     };
                     offset += KEY_SIZE;
                     if key.trim_matches(char::from(0)) == kv.key.trim_matches(char::from(0)) {
-                        let value_raw = kv.value.as_bytes();
-                        self.page.write_bytes_at_offset(value_raw, offset, VALUE_SIZE)?;
+                        let value_raw = kv.value.to_be_bytes();
+                        self.page.write_bytes_at_offset(&value_raw, offset, VALUE_SIZE)?;
                         return Ok(());
                     }
                     offset += VALUE_SIZE;
@@ -691,7 +686,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 父节点指针 0
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // 键值对个数 1
             0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello" 键
-            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world" 值
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096
         ];
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
         let mut page = [0x00; PAGE_SIZE];
@@ -720,7 +715,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 父节点指针 0
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // 键值对数量 1
             0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello" 键
-            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world" 值
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096
         ];
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
         let mut page = [0x00; PAGE_SIZE];
@@ -742,7 +737,7 @@ mod tests {
         };
 
         assert_eq!(first_kv.key, "hello");
-        assert_eq!(first_kv.value, "world");
+        assert_eq!(first_kv.value, 4096usize);
 
         Ok(())
     }
@@ -869,8 +864,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // 键值对个数 2
             0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello" 键0
             0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world" 值0
-            0x66, 0x6f, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // "foo"   键1
-            0x62, 0x61, 0x72, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // "bar"   值1
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // 4096 * 2
         ];
 
         let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
