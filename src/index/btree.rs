@@ -2,11 +2,12 @@ use std::convert::TryFrom;
 use std::sync::{Arc, RwLock};
 
 use crate::index::key_value_pair::KeyValuePair;
-use crate::index::node::{Node, NodeSpec, NodeType};
+use crate::index::node::{Node, NodeSpec, NodeType, LEAF_NODE_NEXT_NODE_PTR_OFFSET, LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET};
 use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;
+use crate::util::error::Error::UnexpectedError;
 
 /// B+树 配置
 pub const MAX_BRANCHING_FACTOR: usize = 200;
@@ -61,6 +62,121 @@ impl BTree {
             None => Err(Error::KeyNotFound),
         };
     }
+
+    /// 在树上查询一个两个键之间的所有节点
+    pub fn search_range(&self, raw_left_key: Option<String>, raw_right_key: Option<String>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<KeyValuePair>, Error> {
+        match raw_left_key {
+            Some(left_key) => {
+                let (node, raw_kv) = self.search_node(Arc::clone(&self.root), &left_key, buffer)?;
+                let mut res = Vec::<KeyValuePair>::new();
+                match raw_kv {
+                    Some(kv) => kv,
+                    None => return Err(Error::KeyNotFound),
+                };
+                let read_node = match node.read() {
+                    Ok(rn) => rn,
+                    _ => return Err(Error::UnexpectedError)
+                };
+                let mut next_node_offset = read_node.offset;
+                let mut right_key = "".to_string();
+                let has_right_key = match raw_right_key {
+                    Some(right_key_data) => {
+                        right_key = right_key_data;
+                        true
+                    }
+                    None => false
+                };
+                while next_node_offset != 0 {
+                    let page_num = next_node_offset / PAGE_SIZE;
+                    let new_node =
+                        Arc::new(
+                            RwLock::new(
+                                Node::try_from(
+                                    NodeSpec {
+                                        page_data: self.pager.get_page(&page_num, buffer).unwrap().get_data(),
+                                        offset: next_node_offset,
+                                    }
+                                )?
+                            )
+                        );
+                    let read_node = match new_node.read() {
+                        Ok(rn ) => rn,
+                        _ => return Err(Error::UnexpectedError)
+                    };
+                    next_node_offset = read_node.page.get_value_from_offset(LEAF_NODE_NEXT_NODE_PTR_OFFSET)?;
+                    let mut ok = false;
+                    if has_right_key {
+                        for i in read_node.get_keys()? {
+                            if i.trim() == right_key.trim() {
+                                ok = true;
+                                break;
+                            }
+                        }
+                    }
+                    if ok {
+                        let mut kv_pairs = read_node.get_key_value_pairs()?;
+                        kv_pairs.sort();
+
+                        for i in kv_pairs {
+                            if i.key.trim() <= right_key.trim() {
+                                res.push(i);
+                            } else {
+                                break;
+                            }
+                        }
+                        break;
+                    } else {
+                        for i in read_node.get_key_value_pairs()? {
+                            res.push(i);
+                        }
+                    }
+                }
+                Ok(res)
+            }
+            None => {
+                match raw_right_key {
+                    Some(right_key) => {
+                        let (node, raw_kv) = self.search_node(Arc::clone(&self.root), &right_key, buffer)?;
+                        match raw_kv {
+                            Some(kv) => kv,
+                            None => return Err(Error::KeyNotFound),
+                        };
+                        let read_node = match node.read() {
+                            Ok(rn) => rn,
+                            _ => return Err(Error::UnexpectedError)
+                        };
+                        let mut res = Vec::<KeyValuePair>::new();
+                        let mut next_node_offset = read_node.offset;
+                        while next_node_offset != 0 {
+                            let page_num = next_node_offset / PAGE_SIZE;
+                            let new_node =
+                                Arc::new(
+                                    RwLock::new(
+                                        Node::try_from(
+                                            NodeSpec {
+                                                page_data: self.pager.get_page(&page_num, buffer).unwrap().get_data(),
+                                                offset: next_node_offset,
+                                            }
+                                        )?
+                                    )
+                                );
+                            let read_node = match new_node.read() {
+                                Ok(rn) => rn,
+                                _ => return Err(Error::UnexpectedError)
+                            };
+                            next_node_offset = read_node.page.get_value_from_offset(LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET)?;
+                            for i in read_node.get_key_value_pairs()? {
+                                res.push(i);
+                            }
+                        }
+                        Ok(res)
+                    }
+                    None => return Err(UnexpectedError)
+                }
+            }
+        }
+    }
+
 
     /// 插入一个键值对，可能沿途分裂节点
     pub fn insert(&mut self, kv: KeyValuePair, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
@@ -295,7 +411,7 @@ impl BTree {
                             None => Err(Error::UnexpectedError)
                         }
                     }
-                }
+                };
             }
             NodeType::Unknown => {
                 Err(Error::UnexpectedError)

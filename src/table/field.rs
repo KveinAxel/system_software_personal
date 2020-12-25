@@ -222,6 +222,36 @@ impl Field {
         }
     }
 
+    pub fn search_range(&self, left: Option<FieldValue>, right: Option<FieldValue>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<Vec<u8>>, Error> {
+        match &self.btree {
+            Some(btree) => {
+                let mut siz = 32;
+                let left_string = match left {
+                    Some(left_value) => {
+                        siz = left_value.to_size();
+                        Some((&left_value).into())
+                    },
+
+                    None => None
+                };
+                let right_string = match right {
+                    Some(right_value) => {
+                        siz = right_value.to_size();
+                        Some((&right_value).into())
+                    },
+                    None => None
+                };
+                let res = btree.search_range(left_string, right_string, buffer)?;
+                let mut res_vec = Vec::<Vec<u8>>::new();
+                for (i, item) in res.iter().enumerate() {
+                    res_vec.push(btree.pager.get_value(item.value, siz, buffer)?);
+                }
+                Ok(res_vec)
+            }
+            None => Err(Error::IndexWithoutBTree)
+        }
+    }
+
     pub fn is_indexed(&self) -> bool {
         match &self.btree {
             Some(_) => true,

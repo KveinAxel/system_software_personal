@@ -44,7 +44,7 @@ impl Table {
         let field = if self.fields.get(key_index).unwrap().is_indexed() {
             self.fields.get(key_index).unwrap()
         } else {
-            self.fields.get(0).unwrap()
+            return Err(Error::IndexWithoutBTree)
         };
         let res = field.search(fv, buffer)?;
         let res_slice = res.as_slice();
@@ -63,9 +63,48 @@ impl Table {
 
     }
 
-    pub fn search_range(&self, key_index: usize, left_value: Option<FieldValue>, right_value: Option<FieldValue>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<Entry>, Error> {
-        unimplemented!()
-        // todo
+    pub fn search_range(&self, key_index: usize, raw_left_value: Option<FieldValue>, raw_right_value: Option<FieldValue>, buffer: &mut Box<dyn Buffer>) -> Result<Vec<Entry>, Error> {
+        if key_index > self.fields.len() {
+            return Err(Error::UnexpectedError)
+        }
+
+        match &raw_left_value {
+            Some(left_value) => {
+                Table::check_field(self.fields.get(key_index).unwrap(), left_value)?;
+            }
+            None => ()
+        };
+        match &raw_right_value {
+            Some(right_value) => {
+                Table::check_field(self.fields.get(key_index).unwrap(), right_value)?;
+            }
+            None => ()
+        };
+
+        let field = if self.fields.get(key_index).unwrap().is_indexed() {
+            self.fields.get(key_index).unwrap()
+        } else {
+            return Err(Error::IndexWithoutBTree)
+        };
+
+        let res = field.search_range(raw_left_value, raw_right_value, buffer)?;
+        let mut res_vec = Vec::<Entry>::new();
+        for row in res {
+            let res_slice = row.as_slice();
+            let mut offset = 0;
+            let mut entry = Entry {
+                data: Vec::<FieldValue>::new()
+            };
+
+            for item in &self.fields {
+                let (fv, siz) = item.parse_self(res_slice, offset)?;
+                offset += siz;
+                entry.data.push(fv);
+            }
+            res_vec.push(entry);
+        }
+
+        Ok(res_vec)
     }
 
     fn check_field(field: &Field, fv: &FieldValue) -> Result<(), Error> {
