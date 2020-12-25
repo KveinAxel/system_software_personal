@@ -91,11 +91,14 @@ impl Table {
             return Err(Error::IndexWithoutBTree)
         };
 
-        let siz = match field.field_type {
-            FieldType::INT32 => 4,
-            FieldType::FLOAT32 => 4,
-            FieldType::VARCHAR40 => 40,
-        };
+        let mut siz = 0;
+        for f in &self.fields {
+            siz += match f.field_type {
+                FieldType::INT32 => 4,
+                FieldType::FLOAT32 => 4,
+                FieldType::VARCHAR40 => 40,
+            };
+        }
         let res = field.search_range(raw_left_value, raw_right_value, buffer, siz, &mut self.pager)?;
         let mut res_vec = Vec::<Entry>::new();
         for row in res {

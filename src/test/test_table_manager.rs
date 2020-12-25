@@ -5,6 +5,8 @@ mod test {
     use crate::table::table_manager::TableManager;
     use crate::table::field::{Field, FieldType, FieldValue};
     use crate::table::entry::{Entry};
+    use crate::data_item::buffer::LRUBuffer;
+    use std::fs;
 
     #[test]
     fn test_create_table() -> Result<(), Error>{
@@ -33,9 +35,16 @@ mod test {
 
     #[test]
     fn test_insert_and_read_full_table() -> Result<(), Error>{
-        rm_test_file();
+        match fs::remove_file("id.idx") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test_table") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
 
-        let buffer = gen_buffer()?;
+        let buffer = Box::new(LRUBuffer::new(4, "metadata.db".to_string())?);
         let mut table = TableManager::new(buffer);
         let mut fields = Vec::<Field>::new();
         let f1 = Field::create_field("id".to_string(), FieldType::INT32)?;
@@ -68,7 +77,14 @@ mod test {
             _ => assert!(false)
         };
 
-        rm_test_file();
+        match fs::remove_file("id.idx") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
+        match fs::remove_file("test_table") {
+            Ok(_) => (),
+            Err(_) => (),
+        };
         Ok(())
     }
 

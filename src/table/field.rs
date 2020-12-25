@@ -131,13 +131,13 @@ impl Field {
                 let mut i32_data: [u8; 4] = [0; 4];
                 i32_data.clone_from_slice(&bytes[offset..offset + 4]);
                 let res = i32::from_be_bytes(i32_data);
-                Ok((FieldValue::INT32(res), 32))
+                Ok((FieldValue::INT32(res), 4))
             }
             FieldType::FLOAT32 => {
                 let mut f32_data = [0u8; 4];
                 f32_data.clone_from_slice(&bytes[offset..offset + 4]);
                 let res = f32::from_be_bytes(f32_data);
-                Ok((FieldValue::FLOAT32(res), 32))
+                Ok((FieldValue::FLOAT32(res), 4))
             }
             FieldType::VARCHAR40 => {
                 let mut char_data: [u8; 40] = [0; 40];

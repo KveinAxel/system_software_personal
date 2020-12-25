@@ -23,12 +23,14 @@ impl Clone for Pager {
 
 impl Pager {
     pub fn new(file_name: String, max_size: usize, buffer: &mut Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
-        let pager = Box::new(
+        let mut vec = Vec::<(usize, usize)>::new();
+        vec.push((0, 0));
+        let mut pager = Box::new(
             Pager {
                 cnt: 0,
                 max_size,
                 file_name,
-                remain_size: Vec::<(usize, usize)>::new(),
+                remain_size: vec,
             }
         );
         pager.fill_up_to(&max_size, buffer)?;
@@ -36,7 +38,8 @@ impl Pager {
     }
 
     /// 将文件大小扩充到指定页数
-    pub fn fill_up_to(&self, num_of_page: &usize, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
+    pub fn fill_up_to(&mut self, num_of_page: &usize, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
+        self.max_size = *num_of_page;
         buffer.fill_up_to(self.file_name.as_str(), *num_of_page)
     }
 
@@ -63,21 +66,25 @@ impl Pager {
     pub fn insert_value(&mut self, bytes: &[u8], buffer: &mut Box<dyn Buffer>) -> Result<usize, Error> {
         let len = bytes.len();
         for (i, (siz, offset)) in self.remain_size.clone().iter().enumerate() {
+            if i == 0 {
+                continue;
+            }
             if *siz > len {
-                let mut page = self.get_page(&(i+1), buffer)?;
+                let mut page = self.get_page(&i, buffer)?;
                 page.write_bytes_at_offset(bytes, *offset, len)?;
                 self.write_page(page, buffer)?;
 
                 let new_siz = *siz - len;
                 let new_offset = *offset + len;
                 self.remain_size[i] = (new_siz, new_offset);
-                return Ok(*offset + (self.cnt - 1) * PAGE_SIZE)
+                return Ok(*offset + (i - 1) * PAGE_SIZE)
             }
         }
 
         let mut page = self.get_new_page(buffer)?;
         page.write_bytes_at_offset(bytes, 0, len)?;
-        self.remain_size[self.cnt - 1] = (PAGE_SIZE - len, len);
+        self.write_page(page, buffer)?;
+        self.remain_size[self.cnt] = (PAGE_SIZE - len, len);
         Ok((self.cnt - 1) * PAGE_SIZE)
     }
 
