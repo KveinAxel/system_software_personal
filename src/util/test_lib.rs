@@ -8,8 +8,12 @@ use std::path::Path;
 
 #[allow(dead_code)]
 pub fn rm_test_file() {
-    fs::remove_file("metadata.db").unwrap();
-    fs::remove_file("metadata.db").unwrap();
+    match fs::remove_file("metadata.db") {
+        _ => ()
+    };
+    match fs::remove_file("test.db") {
+        _ => ()
+    };
 }
 
 #[allow(dead_code)]

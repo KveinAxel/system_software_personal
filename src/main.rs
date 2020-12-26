@@ -17,8 +17,8 @@ fn main() {
 
     let dialect = GenericDialect {};
 
-    let ast = &Parser::parse_sql(&dialect, sql).unwrap()[0];
+    let _ast = &Parser::parse_sql(&dialect, sql).unwrap()[0];
 
-    println!("{:#?}", ast);
+    // println!("{:#?}", ast);
 
 }
