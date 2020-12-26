@@ -17,8 +17,8 @@ jobs:
     steps:
     - name: checkout source code
       uses: actions/checkout@v2
-    - name: checkout submodule
-      uses: textbook/git-checkout-submodule-action@master
+      with:
+        submodules: 'true'
     - name: Build
       run: cargo build --verbose
     - name: Run tests
