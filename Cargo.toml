@@ -10,3 +10,4 @@ edition = "2018"
 byteorder = "1.3.4"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 memmap = "0.7.0"
+sqlparser = { path = 'src/submodule/sqlparser-rs' }

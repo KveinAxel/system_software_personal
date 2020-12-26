@@ -52,6 +52,7 @@ pub(crate) const MAX_SPACE_FOR_CHILDREN: usize = (MAX_BRANCHING_FACTOR + 1) * PT
 /// 这意味着每个键被限制为 12 字节. (2470 / keys limit(199) ~= 12)
 /// 向下取整到 10 来容纳叶子节点.
 const INTERNAL_NODE_KEY_OFFSET: usize = INTERNAL_NODE_CHILDREN_OFFSET + MAX_SPACE_FOR_CHILDREN;
+#[allow(dead_code)]
 pub(crate) const MAX_SPACE_FOR_KEYS: usize = PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE - MAX_SPACE_FOR_CHILDREN;
 
 /// 键和值的大小

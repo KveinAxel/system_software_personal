@@ -6,9 +6,6 @@ pub mod table;
 pub mod test;
 
 
-///
-/// todo 表管理
-///
 fn main() {
 
     // 初始化完成

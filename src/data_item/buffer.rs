@@ -483,6 +483,7 @@ pub struct ClockBufferItem {
 }
 
 impl ClockBuffer {
+    #[allow(dead_code)]
     pub(crate) fn new(buff_size: usize, meta_file_name: String) -> Result<ClockBuffer, Error> {
         let path = Path::new(meta_file_name.as_str());
         let mut hashmap = HashMap::<String, File>::new();
