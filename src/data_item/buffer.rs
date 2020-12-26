@@ -454,7 +454,7 @@ impl Buffer for LRUBuffer {
     }
 
     fn get_buffer_size(&self) -> usize {
-        return self.buff_size;
+        self.buff_size
     }
 
     fn flush_file(&mut self, file_name: &str) -> Result<(), Error> {
@@ -654,7 +654,7 @@ impl Buffer for ClockBuffer {
             };
         }
 
-        return Ok(Page::new(page, file_name, page_num));
+        Ok(Page::new(page, file_name, page_num))
     }
 
     /// 向缓冲区写入一个页面, 需要确保page.page_num正确
@@ -803,7 +803,7 @@ impl Buffer for ClockBuffer {
     }
 
     fn get_buffer_size(&self) -> usize {
-        return self.buff_size;
+        self.buff_size
     }
 
 
@@ -815,7 +815,7 @@ impl Buffer for ClockBuffer {
                 file.write_all(&i.page.get_data())?;
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn flush_all(&mut self) -> Result<(), Error> {
@@ -824,6 +824,6 @@ impl Buffer for ClockBuffer {
             file.seek(SeekFrom::Start(((i.page.page_num - 1) * PAGE_SIZE + NON_DATA_PAGE * PAGE_SIZE) as u64))?;
             file.write_all(&i.page.get_data())?;
         }
-        return Ok(());
+        Ok(())
     }
 }

@@ -8,14 +8,8 @@ use std::path::Path;
 
 #[allow(dead_code)]
 pub fn rm_test_file() {
-    match fs::remove_file("metadata.db") {
-        Ok(_) => (),
-        Err(_) => (),
-    };
-    match fs::remove_file("test.db") {
-        Ok(_) => (),
-        Err(_) => (),
-    };
+    fs::remove_file("metadata.db").unwrap();
+    fs::remove_file("metadata.db").unwrap();
 }
 
 #[allow(dead_code)]
@@ -24,12 +18,12 @@ pub fn gen_buffer() -> Result<Box<dyn Buffer>, Error> {
     buffer.add_file(Path::new("test.db"))?;
     buffer.fill_up_to("test.db", 10)?;
 
-    return Ok(buffer);
+    Ok(buffer)
 }
 
 #[allow(dead_code)]
 pub fn gen_pager(buffer: &mut Box<dyn Buffer>) -> Result<Box<Pager>, Error> {
-    return Ok(Pager::new("test.db".to_string(), 50, buffer)?);
+    Ok(Pager::new("test.db".to_string(), 50, buffer)?)
 }
 
 #[allow(dead_code)]

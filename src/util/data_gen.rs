@@ -3,5 +3,5 @@ pub fn get_empty_data(siz: usize) -> Vec<u8>{
     for _i in 0..siz {
         vec.push(0u8);
     }
-    return vec;
+    vec
 }

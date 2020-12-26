@@ -42,7 +42,7 @@ impl BTree {
                     Node::new(
                         NodeType::Leaf,
                         0,
-                        page_num.clone(),
+                        page_num,
                         true,
                         page,
                     )?
@@ -53,17 +53,17 @@ impl BTree {
             file_name,
             pager,
             root,
-            first_offset: page_num.clone(),
+            first_offset: page_num,
         })
     }
 
     /// 在树上查询一个键
     pub fn search(&self, key: String, buffer: &mut Box<dyn Buffer>) -> Result<KeyValuePair, Error> {
         let (_, kv) = self.search_node(Arc::clone(&self.root), &key, buffer)?;
-        return match kv {
+        match kv {
             Some(kv) => Ok(kv),
             None => Err(Error::KeyNotFound),
-        };
+        }
     }
 
     /// 在树上查询一个两个键之间的所有节点
@@ -213,10 +213,8 @@ impl BTree {
     /// 插入一个键值对，可能沿途分裂节点
     pub fn insert(&mut self, kv: KeyValuePair, buffer: &mut Box<dyn Buffer>) -> Result<(), Error> {
         let (node, kv_pair_exists) = self.search_node_inserted(Arc::clone(&self.root), &kv.key, buffer)?;
-        match kv_pair_exists {
-            // 树中已经有键了
-            Some(_) => return Err(Error::KeyAlreadyExists),
-            None => (),
+        if kv_pair_exists.is_some() {
+            return Err(Error::KeyAlreadyExists)
         };
         // 在这里加键可能会沿途分裂节点
         let mut guarded_node = match node.write() {
@@ -273,7 +271,7 @@ impl BTree {
     fn search_node(
         &self,
         node: Arc<RwLock<Node>>,
-        search_key: &String,
+        search_key: &str,
         buffer: &mut Box<dyn Buffer>,
     ) -> Result<(Arc<RwLock<Node>>, Option<KeyValuePair>), Error> {
 
@@ -312,7 +310,7 @@ impl BTree {
                 let keys = guarded_node.get_keys()?;
                 let mut index: Option<usize> = None;
                 for (i, key) in keys.iter().enumerate() {
-                    if *search_key <= *key {
+                    if *search_key <= *key.as_str() {
                         index = Some(i);
                         break;
                     }
@@ -330,7 +328,7 @@ impl BTree {
                             offset: *child_offset,
                             page_data: self.pager.get_page(&page_num, buffer)?.get_data(),
                         })?;
-                        return self.search_node(Arc::new(RwLock::new(child_node)), search_key, buffer);
+                        self.search_node(Arc::new(RwLock::new(child_node)), search_key, buffer)
                     }
                     None => Err(Error::KeyNotFound)
                 }
@@ -350,7 +348,7 @@ impl BTree {
     fn search_node_inserted(
         &mut self,
         node: Arc<RwLock<Node>>,
-        search_key: &String,
+        search_key: &str,
         buffer: &mut Box<dyn Buffer>,
     ) -> Result<(Arc<RwLock<Node>>, Option<KeyValuePair>), Error> {
 
@@ -389,7 +387,7 @@ impl BTree {
                 let keys = guarded_node.get_keys()?;
                 let mut index: Option<usize> = None;
                 for (i, key) in keys.iter().enumerate() {
-                    if *search_key <= *key {
+                    if *search_key <= *key.as_str() {
                         index = Some(i);
                         break;
                     }
@@ -461,7 +459,7 @@ impl BTree {
             Ok(node) => node,
         };
 
-        return if guarded_node.is_root {
+        if guarded_node.is_root {
             // 如果是根节点，直接分裂
             let (is_split, offset) = guarded_node.split(&mut self.pager, buffer)?;
             if guarded_node.offset == self.first_offset && is_split {
@@ -492,6 +490,6 @@ impl BTree {
 
             }
             Ok(())
-        };
+        }
     }
 }

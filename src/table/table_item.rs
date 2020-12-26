@@ -17,7 +17,7 @@ impl Table {
         Ok(Table {
             table_name: table_name.clone(),
             fields: Vec::<Field>::new(),
-            pager: Pager::new(table_name.clone(), 40, buffer)?,
+            pager: Pager::new(table_name, 40, buffer)?,
         })
     }
 
@@ -154,7 +154,7 @@ impl Clone for Table {
         }
         Table {
             table_name: self.table_name.clone(),
-            fields: fields.clone(),
+            fields,
             pager: self.pager.clone()
         }
     }

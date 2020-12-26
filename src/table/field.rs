@@ -79,9 +79,9 @@ impl From<FieldValue> for i32 {
 impl From<FieldValue> for String {
     fn from(fv: FieldValue) -> Self {
         match fv {
-            FieldValue::INT32(data) => data.to_string().clone(),
-            FieldValue::FLOAT32(data) => data.to_string().clone(),
-            FieldValue::VARCHAR40(data) => data.clone()
+            FieldValue::INT32(data) => data.to_string(),
+            FieldValue::FLOAT32(data) => data.to_string(),
+            FieldValue::VARCHAR40(data) => data
         }
     }
 }
@@ -89,8 +89,8 @@ impl From<FieldValue> for String {
 impl From<&FieldValue> for String {
     fn from(fv: &FieldValue) -> Self {
         match fv {
-            FieldValue::INT32(data) => data.to_string().clone(),
-            FieldValue::FLOAT32(data) => data.to_string().clone(),
+            FieldValue::INT32(data) => data.to_string(),
+            FieldValue::FLOAT32(data) => data.to_string(),
             FieldValue::VARCHAR40(data) => data.clone()
         }
     }
@@ -173,7 +173,7 @@ impl Field {
         self.btree = Some(
             BTree::new(
                 pager,
-                file_name.clone(),
+                file_name,
                 buffer,
             )?
         );
@@ -218,7 +218,7 @@ impl Field {
                         let siz = fv.to_size();
                         btree.pager.get_value(offset, siz, buffer)
                     }
-                    Err(err) => return Err(err)
+                    Err(err) => Err(err)
                 }
             }
             None => {
@@ -258,9 +258,6 @@ impl Field {
     }
 
     pub fn is_indexed(&self) -> bool {
-        match &self.btree {
-            Some(_) => true,
-            None => false
-        }
+        self.btree.is_some()
     }
 }

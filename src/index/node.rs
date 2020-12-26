@@ -69,11 +69,11 @@ pub enum NodeType {
 /// 将一个字节转换成 NodeType.
 impl From<u8> for NodeType {
     fn from(orig: u8) -> Self {
-        return match orig {
+        match orig {
             0x01 => NodeType::Internal,
             0x02 => NodeType::Leaf,
             _ => NodeType::Unknown,
-        };
+        }
     }
 }
 
@@ -89,19 +89,16 @@ trait ToByte {
 
 impl FromByte for u8 {
     fn from_byte(&self) -> bool {
-        return match self {
-            0x01 => true,
-            _ => false,
-        };
+        matches!(self, 0x01)
     }
 }
 
 impl ToByte for bool {
     fn to_byte(&self) -> u8 {
-        return match self {
+        match self {
             true => 0x01,
             false => 0x00,
-        };
+        }
     }
 }
 
@@ -174,7 +171,7 @@ impl Node {
                     // 去除首位0字符
                     res.push(KeyValuePair::new(
                         key.trim_matches(char::from(0)).to_string(),
-                        value.clone(),
+                        value,
                     ))
                 }
                 Ok(res)
@@ -186,7 +183,7 @@ impl Node {
     /// get_children 如果是中间节点，返回一个孩子节点的 offset 列表，
     /// 否则，返回错误
     pub fn get_children(&self) -> Result<Vec<usize>, Error> {
-        return match self.node_type {
+        match self.node_type {
             NodeType::Internal => {
                 let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
                 let mut result = Vec::<usize>::new();
@@ -199,7 +196,7 @@ impl Node {
                 Ok(result)
             }
             _ => Err(Error::UnexpectedError),
-        };
+        }
     }
 
     /// get_keys 返回一个包装有 Key 列表的 Result
@@ -263,7 +260,7 @@ impl Node {
                 self.page.write_bytes_at_offset(&value_raw, offset + KEY_SIZE, VALUE_SIZE)?;
                 Ok(())
             }
-            _ => return Err(Error::UnexpectedError),
+            _ => Err(Error::UnexpectedError),
         }
     }
 
@@ -288,7 +285,7 @@ impl Node {
                         Ok(key) => key,
                         Err(_) => return Err(Error::UTF8Error),
                     };
-                    if iter_key.to_owned() > key {
+                    if *iter_key > *key.as_str() {
                         // 找到位置.
                         self.page.insert_bytes_at_offset(
                             key.as_bytes(),
@@ -352,12 +349,12 @@ impl Node {
                 }
                 Err(Error::KeyNotFound)
             }
-            _ => return Err(Error::KeyNotFound),
+            _ => Err(Error::KeyNotFound),
         }
     }
 
     /// 将一个内部节点的key更换成新的key（!!!不保证更改后的key的大小顺序!!!）
-    pub fn update_internal_key(&mut self, old_key: &String, new_key: &String) -> Result<(), Error> {
+    pub fn update_internal_key(&mut self, old_key: &str, new_key: &str) -> Result<(), Error> {
         match self.node_type {
             NodeType::Internal => {
                 let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
@@ -369,14 +366,14 @@ impl Node {
                         Ok(key) => key,
                         Err(_) => return Err(Error::UTF8Error),
                     };
-                    if key.to_owned() == *old_key {
+                    if *key == *old_key {
                         return self.page.write_bytes_at_offset(new_key.trim_matches(char::from(0)).as_bytes(), offset, KEY_SIZE);
                     }
                     offset += KEY_SIZE;
                 }
                 Err(Error::KeyNotFound)
             }
-            _ => return Err(Error::UnexpectedError)
+            _ => Err(Error::UnexpectedError)
         }
     }
 
@@ -392,7 +389,7 @@ impl Node {
 
                 Err(Error::KeyNotFound)
             }
-            _ => return Err(Error::UnexpectedError)
+            _ => Err(Error::UnexpectedError)
         }
     }
 
@@ -421,7 +418,7 @@ impl Node {
                 }
                 Err(Error::KeyNotFound)
             }
-            _ => return Err(Error::KeyNotFound),
+            _ => Err(Error::KeyNotFound),
         }
     }
 
@@ -439,7 +436,7 @@ impl Node {
                 self.page.write_bytes_at_offset(&child_offset.to_be_bytes(), offset, PTR_SIZE)?;
                 Ok(())
             }
-            _ => return Err(Error::UnexpectedError)
+            _ => Err(Error::UnexpectedError)
         }
     }
 
@@ -678,10 +675,10 @@ impl Node {
     /// 非叶子节点抛出异常
     /// todo 节点删除
     pub fn delete(&mut self) -> Result<(), Error> {
-        return match self.node_type {
+        match self.node_type {
             NodeType::Leaf => Err(Error::UnexpectedError),
             _ => Err(Error::UnexpectedError)
-        };
+        }
     }
 }
 
@@ -715,12 +712,12 @@ impl TryFrom<NodeSpec> for Node {
         }
         let parent_pointer_offset = page.get_value_from_offset(PARENT_POINTER_OFFSET)?;
 
-        return Node::new(
+        Node::new(
             node_type,
             parent_pointer_offset,
             spec.offset,
             is_root,
             page,
-        );
+        )
     }
 }

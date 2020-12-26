@@ -38,10 +38,9 @@ impl TableManager {
 
     pub fn create_table(&mut self, table_name: String, fields: Vec<Field>) -> Result<(), Error> {
         let raw_table = self.table_cache.get(table_name.as_str());
-        match raw_table {
-            Some(_table) => return Err(Error::TableAlreadyExists),
-            None => ()
-        };
+        if raw_table.is_some() {
+            return Err(Error::TableAlreadyExists)
+        }
 
         let mut table = Table::new(table_name, &mut self.buffer)?;
         table.add_fields(fields);

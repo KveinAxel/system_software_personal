@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-#[derive(Eq, PartialOrd, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct KeyValuePair {
     pub key: String,
     pub value: usize,
@@ -16,13 +16,19 @@ impl Clone for KeyValuePair {
     fn clone(&self) -> KeyValuePair {
         KeyValuePair {
             key: self.key.clone(),
-            value: self.value.clone(),
+            value: self.value,
         }
+    }
+}
+
+impl PartialOrd for KeyValuePair {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for KeyValuePair {
     fn cmp(&self, other: &Self) -> Ordering {
-        return self.key.cmp(&other.key);
+        self.key.cmp(&other.key)
     }
 }
