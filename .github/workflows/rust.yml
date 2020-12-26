@@ -15,9 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: pull submodule
-      run: git submodule update --init --recursive
+    - name: checkout source code
+      uses: actions/checkout@v2
+    - name: checkout submodule
+      uses: textbook/git-checkout-submodule-action@master
     - name: Build
       run: cargo build --verbose
     - name: Run tests
