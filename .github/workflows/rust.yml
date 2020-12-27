@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-          with:
-            submodules: 'true'
+        with:
+          submodules: 'true'
       - name: Setup
         run: rustup default ${RUSTUP_VERSION} && rustup component add clippy rustfmt
       - name: Lint system-softwre
