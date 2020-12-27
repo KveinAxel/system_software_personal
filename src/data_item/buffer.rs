@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use uuid::Uuid;
 
-use crate::page::page_item::{Page, PAGE_SIZE};
+use crate::page::page::{Page, PAGE_SIZE};
 use crate::util::error::Error;
 use crate::util::data_gen::get_empty_data;
 use byteorder::{WriteBytesExt, ReadBytesExt};

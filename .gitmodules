@@ -1,3 +1,6 @@
 [submodule "src/submodule/sqlparser-rs"]
 	path = src/submodule/sqlparser-rs
 	url = git@github.com:ballista-compute/sqlparser-rs.git
+[submodule "src/submodule/ballista"]
+	path = src/submodule/ballista
+	url = git@github.com:ballista-compute/ballista.git

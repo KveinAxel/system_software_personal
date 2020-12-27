@@ -3,7 +3,7 @@ mod test_buffer {
     use crate::data_item::buffer::{Buffer, LRUBuffer, ClockBuffer};
     use std::path::Path;
     use std::fs;
-    use crate::page::page_item::{PAGE_SIZE, Page};
+    use crate::page::page::{PAGE_SIZE, Page};
     use crate::util::error::Error;
     use crate::util::test_lib::rm_test_file;
 

@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::index::btree::MAX_BRANCHING_FACTOR;
 use crate::index::key_value_pair::KeyValuePair;
-use crate::page::page_item::{Page, PAGE_SIZE, PTR_SIZE};
+use crate::page::page::{Page, PAGE_SIZE, PTR_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;

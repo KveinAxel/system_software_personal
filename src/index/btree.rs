@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::index::key_value_pair::KeyValuePair;
 use crate::index::node::{Node, NodeSpec, NodeType, LEAF_NODE_NEXT_NODE_PTR_OFFSET, LEAF_NODE_PREVIOUS_NODE_PTR_OFFSET};
-use crate::page::page_item::{Page, PAGE_SIZE};
+use crate::page::page::{Page, PAGE_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;

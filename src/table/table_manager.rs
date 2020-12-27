@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::table::table_item::Table;
+use crate::table::table::Table;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;
 use crate::table::entry::Entry;
