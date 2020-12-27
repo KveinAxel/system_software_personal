@@ -4,3 +4,6 @@
 [submodule "src/submodule/ballista"]
 	path = src/submodule/ballista
 	url = git@github.com:ballista-compute/ballista.git
+[submodule "submodule/ballista"]
+	path = submodule/ballista
+	url = git@github.com:ballista-compute/ballista.git
