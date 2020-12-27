@@ -34,3 +34,37 @@ jobs:
       run: cargo build
     - name: Run tests
       run: cargo test
+
+  Mac:
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup
+        run: |
+          brew install rustup
+          rustup default ${RUSTUP_VERSION} && rustup component add rustfmt
+      - name: Build system-softwre
+        run: cargo build
+      - name: Run tests
+        run: cargo test
+
+  Windows:
+    runs-on: windows-2016
+    steps:
+      - uses: actions/checkout@v2
+      - name: Prepare the Windows Build Environment
+        run: |
+          vcpkg update
+          vcpkg integrate install
+          vcpkg install openssl:x64-windows
+      - name: Setup Rust Nightly
+        run: |
+          rustup default nightly-2020-05-14
+          rustup toolchain install nightly-2020-05-14 --no-self-update
+          rustup component add rustfmt --toolchain nightly-2020-05-14-x86_64-pc-windows-msvc
+      - name: Build system-softwre
+        run: |
+          cargo build
+      - name: Run tests
+        run: |
+          cargo test
