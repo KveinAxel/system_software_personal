@@ -8,20 +8,29 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_VERSION: nightly-2020-05-14
 
 jobs:
-  build:
-
+  Lint:
     runs-on: ubuntu-latest
-
     steps:
-    - name: checkout source code
-      uses: actions/checkout@v2
+      - uses: actions/checkout@v2
+          with:
+            submodules: 'true'
+      - name: Setup
+        run: rustup default ${RUSTUP_VERSION} && rustup component add clippy rustfmt
+      - name: Lint system-softwre
+        run: cargo clippy -- -D warnings
+
+  Ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
       with:
         submodules: 'true'
-    - name: Build
-      run: cargo build --verbose
+    - name: Setup
+      run: rustup default ${RUSTUP_VERSION} && rustup component add rustfmt
+    - name: build system-softwre
+      run: cargo build
     - name: Run tests
-      run: cargo test --verbose
-    - name: clippy
-      run: cargo clippy --verbose
+      run: cargo test
