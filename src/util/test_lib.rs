@@ -6,14 +6,14 @@ use crate::index::btree::BTree;
 use crate::index::key_value_pair::KeyValuePair;
 use std::path::Path;
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::match_single_binding)]
 pub fn rm_test_file() {
     match fs::remove_file("metadata.db") {
         _ => ()
-    };
+    }
     match fs::remove_file("test.db") {
         _ => ()
-    };
+    }
 }
 
 #[allow(dead_code)]

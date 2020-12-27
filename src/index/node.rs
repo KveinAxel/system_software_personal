@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::index::btree::MAX_BRANCHING_FACTOR;
 use crate::index::key_value_pair::KeyValuePair;
-use crate::page::page::{Page, PAGE_SIZE, PTR_SIZE};
+use crate::page::page_item::{Page, PAGE_SIZE, PTR_SIZE};
 use crate::page::pager::Pager;
 use crate::util::error::Error;
 use crate::data_item::buffer::Buffer;
@@ -149,7 +149,7 @@ impl Node {
     /// get_key_value_pairs 如果是叶子节点，返回一个KeyValuePair的列表，
     /// 否则返回一个Error
     pub fn get_key_value_pairs(&self) -> Result<Vec<KeyValuePair>, Error> {
-        return match self.node_type {
+        match self.node_type {
             NodeType::Leaf => {
                 let mut res = Vec::<KeyValuePair>::new();
                 let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
@@ -177,7 +177,7 @@ impl Node {
                 Ok(res)
             }
             _ => Err(Error::UnexpectedError),
-        };
+        }
     }
 
     /// get_children 如果是中间节点，返回一个孩子节点的 offset 列表，
@@ -202,7 +202,7 @@ impl Node {
     /// get_keys 返回一个包装有 Key 列表的 Result
     /// todo check 能否保证拿出来的键有序？
     pub fn get_keys(&self) -> Result<Vec<String>, Error> {
-        return match self.node_type {
+        match self.node_type {
             NodeType::Internal => {
                 let mut result = Vec::<String>::new();
                 let mut offset = INTERNAL_NODE_KEY_OFFSET;
@@ -237,7 +237,7 @@ impl Node {
                 Ok(res)
             }
             NodeType::Unknown => Err(Error::UnexpectedError),
-        };
+        }
     }
 
     /// add_key_value_pair 增加一个键值对到 self ,
@@ -267,7 +267,7 @@ impl Node {
     /// 增加一个键, 和该键的右子节点
     /// 只应当在中间节点上使用.
     pub fn add_key_and_left_child(&mut self, key: String, left_child_offset: usize) -> Result<(), Error> {
-        return match self.node_type {
+        match self.node_type {
             NodeType::Internal => {
                 // 更新孩子数 (等于键数+1)
                 let num_children = self.page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
@@ -325,7 +325,7 @@ impl Node {
                 Ok(())
             }
             _ => Err(Error::UnexpectedError),
-        };
+        }
     }
 
     /// get_keys_len 获取当前节点的键数.

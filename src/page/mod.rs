@@ -1,2 +1,2 @@
 pub mod pager;
-pub mod page;
+pub mod page_item;

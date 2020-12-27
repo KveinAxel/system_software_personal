@@ -4,7 +4,7 @@ mod test_node {
     use std::convert::TryFrom;
 
     use crate::index::node::{INTERNAL_NODE_HEADER_SIZE, KEY_SIZE, LEAF_NODE_HEADER_SIZE, Node, NodeSpec, VALUE_SIZE, MAX_SPACE_FOR_KEYS, MAX_SPACE_FOR_CHILDREN};
-    use crate::page::page::{PAGE_SIZE, PTR_SIZE};
+    use crate::page::page_item::{PAGE_SIZE, PTR_SIZE};
     use crate::util::error::Error;
 
     #[test]

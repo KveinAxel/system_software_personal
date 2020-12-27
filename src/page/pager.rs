@@ -1,5 +1,5 @@
 use crate::data_item::buffer::Buffer;
-use crate::page::page::{Page, PAGE_SIZE};
+use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
 
 /// 每个 Pager 管理一个文件

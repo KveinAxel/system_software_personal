@@ -1,4 +1,4 @@
 pub mod table_manager;
-pub mod table;
+pub mod table_item;
 pub mod field;
 pub(crate) mod entry;

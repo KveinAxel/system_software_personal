@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use uuid::Uuid;
 
-use crate::page::page::{Page, PAGE_SIZE};
+use crate::page::page_item::{Page, PAGE_SIZE};
 use crate::util::error::Error;
 use crate::util::data_gen::get_empty_data;
 use byteorder::{WriteBytesExt, ReadBytesExt};
@@ -313,7 +313,7 @@ impl Buffer for LRUBuffer {
         }
 
         // 缓冲没命中，更新缓冲
-        return if self.len < self.buff_size {
+        if self.len < self.buff_size {
             // 缓冲没满
             self.list.push_back(LRUBufferItem {
                 page,
@@ -360,7 +360,7 @@ impl Buffer for LRUBuffer {
                 }
                 None => Err(Error::UnexpectedError)
             }
-        };
+        }
     }
 
     /// 强制刷新一个缓冲区的页面至磁盘
@@ -667,7 +667,7 @@ impl Buffer for ClockBuffer {
             }
         }
         // 如果缓冲没命中
-        return if self.len < self.buff_size {
+        if self.len < self.buff_size {
             self.len += 1;
             // 缓冲没满，直接加入缓冲
             self.list.push(ClockBufferItem {
@@ -708,7 +708,7 @@ impl Buffer for ClockBuffer {
                 access: 1,
             };
             Ok(())
-        };
+        }
     }
 
     /// 强制刷新一个缓冲区的页面至磁盘
